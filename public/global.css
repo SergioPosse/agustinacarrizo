@@ -1,0 +1,36 @@
+html, body {
+	width: 100vw;
+	margin:0 !important;
+	padding:0 !important;
+	z-index: -3;
+	font-family: 'Lato', sans-serif;
+	background-color:rgb(49, 4, 49);
+	display:flex;
+}
+.social-over{
+	left:0 !important;
+}
+:root{
+	--light:0.3;
+	--beta: 0.5;
+	--alpha:0.8;
+	--yellow:rgb(209, 218, 136,0.4);
+	--l-purple:rgb(187, 166, 170);
+	--m-purple: rgba(240, 140, 174);
+	--h-purple:rgba(77, 45, 82);
+	--dark:rgba(29, 26, 49);
+	--dark-alpha:rgba(29,26,49,0.8);
+	--dark-beta:rgba(29,26,49,0.4);
+	--main-purple: rgba(154, 76, 149);
+	--main-purple-alpha:rgba(154, 76, 149, 0.8);
+	--main-purple-beta:rgba(154, 76, 149,0.4);
+}
+::-moz-selection { /* Code for Firefox */
+	color: red;
+	background: yellow;
+  }
+  
+  ::selection {
+	color: red;
+	background: yellow;
+  }

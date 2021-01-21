@@ -1,0 +1,6220 @@
+
+(function(l, r) { if (l.getElementById('livereloadscript')) return; r = l.createElement('script'); r.async = 1; r.src = '//' + (window.location.host || 'localhost').split(':')[0] + ':35729/livereload.js?snipver=1'; r.id = 'livereloadscript'; l.getElementsByTagName('head')[0].appendChild(r) })(window.document);
+var app = (function () {
+    'use strict';
+
+    function noop() { }
+    const identity = x => x;
+    function add_location(element, file, line, column, char) {
+        element.__svelte_meta = {
+            loc: { file, line, column, char }
+        };
+    }
+    function run(fn) {
+        return fn();
+    }
+    function blank_object() {
+        return Object.create(null);
+    }
+    function run_all(fns) {
+        fns.forEach(run);
+    }
+    function is_function(thing) {
+        return typeof thing === 'function';
+    }
+    function safe_not_equal(a, b) {
+        return a != a ? b == b : a !== b || ((a && typeof a === 'object') || typeof a === 'function');
+    }
+    function is_empty(obj) {
+        return Object.keys(obj).length === 0;
+    }
+    function null_to_empty(value) {
+        return value == null ? '' : value;
+    }
+    function action_destroyer(action_result) {
+        return action_result && is_function(action_result.destroy) ? action_result.destroy : noop;
+    }
+
+    const is_client = typeof window !== 'undefined';
+    let now = is_client
+        ? () => window.performance.now()
+        : () => Date.now();
+    let raf = is_client ? cb => requestAnimationFrame(cb) : noop;
+
+    const tasks = new Set();
+    function run_tasks(now) {
+        tasks.forEach(task => {
+            if (!task.c(now)) {
+                tasks.delete(task);
+                task.f();
+            }
+        });
+        if (tasks.size !== 0)
+            raf(run_tasks);
+    }
+    /**
+     * Creates a new task that runs on each raf frame
+     * until it returns a falsy value or is aborted
+     */
+    function loop(callback) {
+        let task;
+        if (tasks.size === 0)
+            raf(run_tasks);
+        return {
+            promise: new Promise(fulfill => {
+                tasks.add(task = { c: callback, f: fulfill });
+            }),
+            abort() {
+                tasks.delete(task);
+            }
+        };
+    }
+
+    function append(target, node) {
+        target.appendChild(node);
+    }
+    function insert(target, node, anchor) {
+        target.insertBefore(node, anchor || null);
+    }
+    function detach(node) {
+        node.parentNode.removeChild(node);
+    }
+    function element(name) {
+        return document.createElement(name);
+    }
+    function text(data) {
+        return document.createTextNode(data);
+    }
+    function space() {
+        return text(' ');
+    }
+    function listen(node, event, handler, options) {
+        node.addEventListener(event, handler, options);
+        return () => node.removeEventListener(event, handler, options);
+    }
+    function attr(node, attribute, value) {
+        if (value == null)
+            node.removeAttribute(attribute);
+        else if (node.getAttribute(attribute) !== value)
+            node.setAttribute(attribute, value);
+    }
+    function children(element) {
+        return Array.from(element.childNodes);
+    }
+    function set_style(node, key, value, important) {
+        node.style.setProperty(key, value, important ? 'important' : '');
+    }
+    function custom_event(type, detail) {
+        const e = document.createEvent('CustomEvent');
+        e.initCustomEvent(type, false, false, detail);
+        return e;
+    }
+
+    const active_docs = new Set();
+    let active = 0;
+    // https://github.com/darkskyapp/string-hash/blob/master/index.js
+    function hash(str) {
+        let hash = 5381;
+        let i = str.length;
+        while (i--)
+            hash = ((hash << 5) - hash) ^ str.charCodeAt(i);
+        return hash >>> 0;
+    }
+    function create_rule(node, a, b, duration, delay, ease, fn, uid = 0) {
+        const step = 16.666 / duration;
+        let keyframes = '{\n';
+        for (let p = 0; p <= 1; p += step) {
+            const t = a + (b - a) * ease(p);
+            keyframes += p * 100 + `%{${fn(t, 1 - t)}}\n`;
+        }
+        const rule = keyframes + `100% {${fn(b, 1 - b)}}\n}`;
+        const name = `__svelte_${hash(rule)}_${uid}`;
+        const doc = node.ownerDocument;
+        active_docs.add(doc);
+        const stylesheet = doc.__svelte_stylesheet || (doc.__svelte_stylesheet = doc.head.appendChild(element('style')).sheet);
+        const current_rules = doc.__svelte_rules || (doc.__svelte_rules = {});
+        if (!current_rules[name]) {
+            current_rules[name] = true;
+            stylesheet.insertRule(`@keyframes ${name} ${rule}`, stylesheet.cssRules.length);
+        }
+        const animation = node.style.animation || '';
+        node.style.animation = `${animation ? `${animation}, ` : ``}${name} ${duration}ms linear ${delay}ms 1 both`;
+        active += 1;
+        return name;
+    }
+    function delete_rule(node, name) {
+        const previous = (node.style.animation || '').split(', ');
+        const next = previous.filter(name
+            ? anim => anim.indexOf(name) < 0 // remove specific animation
+            : anim => anim.indexOf('__svelte') === -1 // remove all Svelte animations
+        );
+        const deleted = previous.length - next.length;
+        if (deleted) {
+            node.style.animation = next.join(', ');
+            active -= deleted;
+            if (!active)
+                clear_rules();
+        }
+    }
+    function clear_rules() {
+        raf(() => {
+            if (active)
+                return;
+            active_docs.forEach(doc => {
+                const stylesheet = doc.__svelte_stylesheet;
+                let i = stylesheet.cssRules.length;
+                while (i--)
+                    stylesheet.deleteRule(i);
+                doc.__svelte_rules = {};
+            });
+            active_docs.clear();
+        });
+    }
+
+    let current_component;
+    function set_current_component(component) {
+        current_component = component;
+    }
+    function get_current_component() {
+        if (!current_component)
+            throw new Error(`Function called outside component initialization`);
+        return current_component;
+    }
+    function onMount(fn) {
+        get_current_component().$$.on_mount.push(fn);
+    }
+
+    const dirty_components = [];
+    const binding_callbacks = [];
+    const render_callbacks = [];
+    const flush_callbacks = [];
+    const resolved_promise = Promise.resolve();
+    let update_scheduled = false;
+    function schedule_update() {
+        if (!update_scheduled) {
+            update_scheduled = true;
+            resolved_promise.then(flush);
+        }
+    }
+    function add_render_callback(fn) {
+        render_callbacks.push(fn);
+    }
+    function add_flush_callback(fn) {
+        flush_callbacks.push(fn);
+    }
+    let flushing = false;
+    const seen_callbacks = new Set();
+    function flush() {
+        if (flushing)
+            return;
+        flushing = true;
+        do {
+            // first, call beforeUpdate functions
+            // and update components
+            for (let i = 0; i < dirty_components.length; i += 1) {
+                const component = dirty_components[i];
+                set_current_component(component);
+                update(component.$$);
+            }
+            set_current_component(null);
+            dirty_components.length = 0;
+            while (binding_callbacks.length)
+                binding_callbacks.pop()();
+            // then, once components are updated, call
+            // afterUpdate functions. This may cause
+            // subsequent updates...
+            for (let i = 0; i < render_callbacks.length; i += 1) {
+                const callback = render_callbacks[i];
+                if (!seen_callbacks.has(callback)) {
+                    // ...so guard against infinite loops
+                    seen_callbacks.add(callback);
+                    callback();
+                }
+            }
+            render_callbacks.length = 0;
+        } while (dirty_components.length);
+        while (flush_callbacks.length) {
+            flush_callbacks.pop()();
+        }
+        update_scheduled = false;
+        flushing = false;
+        seen_callbacks.clear();
+    }
+    function update($$) {
+        if ($$.fragment !== null) {
+            $$.update();
+            run_all($$.before_update);
+            const dirty = $$.dirty;
+            $$.dirty = [-1];
+            $$.fragment && $$.fragment.p($$.ctx, dirty);
+            $$.after_update.forEach(add_render_callback);
+        }
+    }
+
+    let promise;
+    function wait() {
+        if (!promise) {
+            promise = Promise.resolve();
+            promise.then(() => {
+                promise = null;
+            });
+        }
+        return promise;
+    }
+    function dispatch(node, direction, kind) {
+        node.dispatchEvent(custom_event(`${direction ? 'intro' : 'outro'}${kind}`));
+    }
+    const outroing = new Set();
+    let outros;
+    function group_outros() {
+        outros = {
+            r: 0,
+            c: [],
+            p: outros // parent group
+        };
+    }
+    function check_outros() {
+        if (!outros.r) {
+            run_all(outros.c);
+        }
+        outros = outros.p;
+    }
+    function transition_in(block, local) {
+        if (block && block.i) {
+            outroing.delete(block);
+            block.i(local);
+        }
+    }
+    function transition_out(block, local, detach, callback) {
+        if (block && block.o) {
+            if (outroing.has(block))
+                return;
+            outroing.add(block);
+            outros.c.push(() => {
+                outroing.delete(block);
+                if (callback) {
+                    if (detach)
+                        block.d(1);
+                    callback();
+                }
+            });
+            block.o(local);
+        }
+    }
+    const null_transition = { duration: 0 };
+    function create_bidirectional_transition(node, fn, params, intro) {
+        let config = fn(node, params);
+        let t = intro ? 0 : 1;
+        let running_program = null;
+        let pending_program = null;
+        let animation_name = null;
+        function clear_animation() {
+            if (animation_name)
+                delete_rule(node, animation_name);
+        }
+        function init(program, duration) {
+            const d = program.b - t;
+            duration *= Math.abs(d);
+            return {
+                a: t,
+                b: program.b,
+                d,
+                duration,
+                start: program.start,
+                end: program.start + duration,
+                group: program.group
+            };
+        }
+        function go(b) {
+            const { delay = 0, duration = 300, easing = identity, tick = noop, css } = config || null_transition;
+            const program = {
+                start: now() + delay,
+                b
+            };
+            if (!b) {
+                // @ts-ignore todo: improve typings
+                program.group = outros;
+                outros.r += 1;
+            }
+            if (running_program) {
+                pending_program = program;
+            }
+            else {
+                // if this is an intro, and there's a delay, we need to do
+                // an initial tick and/or apply CSS animation immediately
+                if (css) {
+                    clear_animation();
+                    animation_name = create_rule(node, t, b, duration, delay, easing, css);
+                }
+                if (b)
+                    tick(0, 1);
+                running_program = init(program, duration);
+                add_render_callback(() => dispatch(node, b, 'start'));
+                loop(now => {
+                    if (pending_program && now > pending_program.start) {
+                        running_program = init(pending_program, duration);
+                        pending_program = null;
+                        dispatch(node, running_program.b, 'start');
+                        if (css) {
+                            clear_animation();
+                            animation_name = create_rule(node, t, running_program.b, running_program.duration, 0, easing, config.css);
+                        }
+                    }
+                    if (running_program) {
+                        if (now >= running_program.end) {
+                            tick(t = running_program.b, 1 - t);
+                            dispatch(node, running_program.b, 'end');
+                            if (!pending_program) {
+                                // we're done
+                                if (running_program.b) {
+                                    // intro — we can tidy up immediately
+                                    clear_animation();
+                                }
+                                else {
+                                    // outro — needs to be coordinated
+                                    if (!--running_program.group.r)
+                                        run_all(running_program.group.c);
+                                }
+                            }
+                            running_program = null;
+                        }
+                        else if (now >= running_program.start) {
+                            const p = now - running_program.start;
+                            t = running_program.a + running_program.d * easing(p / running_program.duration);
+                            tick(t, 1 - t);
+                        }
+                    }
+                    return !!(running_program || pending_program);
+                });
+            }
+        }
+        return {
+            run(b) {
+                if (is_function(config)) {
+                    wait().then(() => {
+                        // @ts-ignore
+                        config = config();
+                        go(b);
+                    });
+                }
+                else {
+                    go(b);
+                }
+            },
+            end() {
+                clear_animation();
+                running_program = pending_program = null;
+            }
+        };
+    }
+
+    const globals = (typeof window !== 'undefined'
+        ? window
+        : typeof globalThis !== 'undefined'
+            ? globalThis
+            : global);
+
+    function bind(component, name, callback) {
+        const index = component.$$.props[name];
+        if (index !== undefined) {
+            component.$$.bound[index] = callback;
+            callback(component.$$.ctx[index]);
+        }
+    }
+    function create_component(block) {
+        block && block.c();
+    }
+    function mount_component(component, target, anchor) {
+        const { fragment, on_mount, on_destroy, after_update } = component.$$;
+        fragment && fragment.m(target, anchor);
+        // onMount happens before the initial afterUpdate
+        add_render_callback(() => {
+            const new_on_destroy = on_mount.map(run).filter(is_function);
+            if (on_destroy) {
+                on_destroy.push(...new_on_destroy);
+            }
+            else {
+                // Edge case - component was destroyed immediately,
+                // most likely as a result of a binding initialising
+                run_all(new_on_destroy);
+            }
+            component.$$.on_mount = [];
+        });
+        after_update.forEach(add_render_callback);
+    }
+    function destroy_component(component, detaching) {
+        const $$ = component.$$;
+        if ($$.fragment !== null) {
+            run_all($$.on_destroy);
+            $$.fragment && $$.fragment.d(detaching);
+            // TODO null out other refs, including component.$$ (but need to
+            // preserve final state?)
+            $$.on_destroy = $$.fragment = null;
+            $$.ctx = [];
+        }
+    }
+    function make_dirty(component, i) {
+        if (component.$$.dirty[0] === -1) {
+            dirty_components.push(component);
+            schedule_update();
+            component.$$.dirty.fill(0);
+        }
+        component.$$.dirty[(i / 31) | 0] |= (1 << (i % 31));
+    }
+    function init(component, options, instance, create_fragment, not_equal, props, dirty = [-1]) {
+        const parent_component = current_component;
+        set_current_component(component);
+        const prop_values = options.props || {};
+        const $$ = component.$$ = {
+            fragment: null,
+            ctx: null,
+            // state
+            props,
+            update: noop,
+            not_equal,
+            bound: blank_object(),
+            // lifecycle
+            on_mount: [],
+            on_destroy: [],
+            before_update: [],
+            after_update: [],
+            context: new Map(parent_component ? parent_component.$$.context : []),
+            // everything else
+            callbacks: blank_object(),
+            dirty,
+            skip_bound: false
+        };
+        let ready = false;
+        $$.ctx = instance
+            ? instance(component, prop_values, (i, ret, ...rest) => {
+                const value = rest.length ? rest[0] : ret;
+                if ($$.ctx && not_equal($$.ctx[i], $$.ctx[i] = value)) {
+                    if (!$$.skip_bound && $$.bound[i])
+                        $$.bound[i](value);
+                    if (ready)
+                        make_dirty(component, i);
+                }
+                return ret;
+            })
+            : [];
+        $$.update();
+        ready = true;
+        run_all($$.before_update);
+        // `false` as a special case of no DOM component
+        $$.fragment = create_fragment ? create_fragment($$.ctx) : false;
+        if (options.target) {
+            if (options.hydrate) {
+                const nodes = children(options.target);
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                $$.fragment && $$.fragment.l(nodes);
+                nodes.forEach(detach);
+            }
+            else {
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                $$.fragment && $$.fragment.c();
+            }
+            if (options.intro)
+                transition_in(component.$$.fragment);
+            mount_component(component, options.target, options.anchor);
+            flush();
+        }
+        set_current_component(parent_component);
+    }
+    class SvelteComponent {
+        $destroy() {
+            destroy_component(this, 1);
+            this.$destroy = noop;
+        }
+        $on(type, callback) {
+            const callbacks = (this.$$.callbacks[type] || (this.$$.callbacks[type] = []));
+            callbacks.push(callback);
+            return () => {
+                const index = callbacks.indexOf(callback);
+                if (index !== -1)
+                    callbacks.splice(index, 1);
+            };
+        }
+        $set($$props) {
+            if (this.$$set && !is_empty($$props)) {
+                this.$$.skip_bound = true;
+                this.$$set($$props);
+                this.$$.skip_bound = false;
+            }
+        }
+    }
+
+    function dispatch_dev(type, detail) {
+        document.dispatchEvent(custom_event(type, Object.assign({ version: '3.25.0' }, detail)));
+    }
+    function append_dev(target, node) {
+        dispatch_dev("SvelteDOMInsert", { target, node });
+        append(target, node);
+    }
+    function insert_dev(target, node, anchor) {
+        dispatch_dev("SvelteDOMInsert", { target, node, anchor });
+        insert(target, node, anchor);
+    }
+    function detach_dev(node) {
+        dispatch_dev("SvelteDOMRemove", { node });
+        detach(node);
+    }
+    function listen_dev(node, event, handler, options, has_prevent_default, has_stop_propagation) {
+        const modifiers = options === true ? ["capture"] : options ? Array.from(Object.keys(options)) : [];
+        if (has_prevent_default)
+            modifiers.push('preventDefault');
+        if (has_stop_propagation)
+            modifiers.push('stopPropagation');
+        dispatch_dev("SvelteDOMAddEventListener", { node, event, handler, modifiers });
+        const dispose = listen(node, event, handler, options);
+        return () => {
+            dispatch_dev("SvelteDOMRemoveEventListener", { node, event, handler, modifiers });
+            dispose();
+        };
+    }
+    function attr_dev(node, attribute, value) {
+        attr(node, attribute, value);
+        if (value == null)
+            dispatch_dev("SvelteDOMRemoveAttribute", { node, attribute });
+        else
+            dispatch_dev("SvelteDOMSetAttribute", { node, attribute, value });
+    }
+    function set_data_dev(text, data) {
+        data = '' + data;
+        if (text.wholeText === data)
+            return;
+        dispatch_dev("SvelteDOMSetData", { node: text, data });
+        text.data = data;
+    }
+    function validate_slots(name, slot, keys) {
+        for (const slot_key of Object.keys(slot)) {
+            if (!~keys.indexOf(slot_key)) {
+                console.warn(`<${name}> received an unexpected slot "${slot_key}".`);
+            }
+        }
+    }
+    class SvelteComponentDev extends SvelteComponent {
+        constructor(options) {
+            if (!options || (!options.target && !options.$$inline)) {
+                throw new Error(`'target' is a required option`);
+            }
+            super();
+        }
+        $destroy() {
+            super.$destroy();
+            this.$destroy = () => {
+                console.warn(`Component was already destroyed`); // eslint-disable-line no-console
+            };
+        }
+        $capture_state() { }
+        $inject_state() { }
+    }
+
+    function fade(node, { delay = 0, duration = 400, easing = identity }) {
+        const o = +getComputedStyle(node).opacity;
+        return {
+            delay,
+            duration,
+            easing,
+            css: t => `opacity: ${t * o}`
+        };
+    }
+
+    /* src\About.svelte generated by Svelte v3.25.0 */
+    const file = "src\\About.svelte";
+
+    function create_fragment(ctx) {
+    	let about;
+    	let div0;
+    	let section0;
+    	let h20;
+    	let t1;
+    	let p0;
+    	let t2;
+    	let a;
+    	let t4;
+    	let t5;
+    	let section1;
+    	let h21;
+    	let t7;
+    	let img0;
+    	let img0_src_value;
+    	let t8;
+    	let strong0;
+    	let p1;
+    	let t11;
+    	let strong1;
+    	let p2;
+    	let t14;
+    	let div1;
+    	let section2;
+    	let h22;
+    	let t16;
+    	let img1;
+    	let img1_src_value;
+    	let t17;
+    	let p3;
+    	let t19;
+    	let p4;
+    	let t21;
+    	let section3;
+    	let h23;
+    	let t23;
+    	let p5;
+    	let about_transition;
+    	let current;
+    	let mounted;
+    	let dispose;
+
+    	const block = {
+    		c: function create() {
+    			about = element("about");
+    			div0 = element("div");
+    			section0 = element("section");
+    			h20 = element("h2");
+    			h20.textContent = "Who i am?";
+    			t1 = space();
+    			p0 = element("p");
+    			t2 = text("Hello friend! My name is Sergio Posse, im a simple guy interested by every kind of programming but experienced in web development. In my free time i play the guitar and write music, i like experimental or underground bands that blows your mind! Check my \n\t\t\t\t\t");
+    			a = element("a");
+    			a.textContent = "Soundcloud";
+    			t4 = text(" if you feel curious.");
+    			t5 = space();
+    			section1 = element("section");
+    			h21 = element("h2");
+    			h21.textContent = "Formation";
+    			t7 = space();
+    			img0 = element("img");
+    			t8 = space();
+    			strong0 = element("strong");
+    			strong0.textContent = "High School:";
+    			p1 = element("p");
+    			p1.textContent = "IPEM 259 Ambrosio Olmos - INDUSTRIAL (graduated as metalworking speciality)";
+    			t11 = space();
+    			strong1 = element("strong");
+    			strong1.textContent = "Tertiary Studies:";
+    			p2 = element("p");
+    			p2.textContent = "ITec Instituto Tecnológico Río Cuarto (graduated as Superior techichian in soft development)";
+    			t14 = space();
+    			div1 = element("div");
+    			section2 = element("section");
+    			h22 = element("h2");
+    			h22.textContent = "Working Experience";
+    			t16 = space();
+    			img1 = element("img");
+    			t17 = space();
+    			p3 = element("p");
+    			p3.textContent = "Practices when i was studying, like scrum simulations, QA Testing and frontend/backend basics";
+    			t19 = space();
+    			p4 = element("p");
+    			p4.textContent = "Amateur projects for friends and family";
+    			t21 = space();
+    			section3 = element("section");
+    			h23 = element("h2");
+    			h23.textContent = "Main skills";
+    			t23 = space();
+    			p5 = element("p");
+    			p5.textContent = "Global vision - Selflearning - Modeling (UML) - Control versioning (Git) - Operative Systems & Virtual Machines config - Hardware - UX Design (Figma)";
+    			add_location(h20, file, 27, 189, 807);
+    			set_style(a, "z-index", "120");
+    			set_style(a, "color", "#F2E6FC");
+    			attr_dev(a, "target", "_blank");
+    			attr_dev(a, "href", "https://soundcloud.com/kumikobox");
+    			attr_dev(a, "class", "svelte-8m4wcx");
+    			add_location(a, file, 29, 5, 1093);
+    			attr_dev(p0, "class", "svelte-8m4wcx");
+    			add_location(p0, file, 28, 4, 830);
+    			attr_dev(section0, "class", "card-simple svelte-8m4wcx");
+    			add_location(section0, file, 27, 3, 621);
+    			add_location(h21, file, 33, 5, 1281);
+    			attr_dev(img0, "alt", "graduatedImage");
+    			attr_dev(img0, "class", "img-fluid svelte-8m4wcx");
+    			if (img0.src !== (img0_src_value = "/images/graduated.png")) attr_dev(img0, "src", img0_src_value);
+    			add_location(img0, file, 34, 5, 1305);
+    			add_location(strong0, file, 35, 5, 1385);
+    			add_location(p1, file, 35, 34, 1414);
+    			add_location(strong1, file, 36, 6, 1503);
+    			add_location(p2, file, 36, 40, 1537);
+    			attr_dev(section1, "class", "card-over svelte-8m4wcx");
+    			add_location(section1, file, 32, 4, 1247);
+    			attr_dev(div0, "class", "row svelte-8m4wcx");
+    			add_location(div0, file, 26, 2, 600);
+    			add_location(h22, file, 42, 32, 1724);
+    			attr_dev(img1, "alt", "programmerImage");
+    			attr_dev(img1, "class", "img-fluid svelte-8m4wcx");
+    			if (img1.src !== (img1_src_value = "/images/work.png")) attr_dev(img1, "src", img1_src_value);
+    			add_location(img1, file, 43, 4, 1756);
+    			add_location(p3, file, 45, 4, 1832);
+    			add_location(p4, file, 46, 5, 1939);
+    			attr_dev(section2, "class", "card-over svelte-8m4wcx");
+    			add_location(section2, file, 42, 3, 1695);
+    			add_location(h23, file, 49, 103, 2106);
+    			attr_dev(p5, "class", "svelte-8m4wcx");
+    			add_location(p5, file, 50, 4, 2131);
+    			attr_dev(section3, "class", "card-simple svelte-8m4wcx");
+    			add_location(section3, file, 49, 3, 2006);
+    			attr_dev(div1, "class", "row svelte-8m4wcx");
+    			add_location(div1, file, 40, 2, 1670);
+    			attr_dev(about, "class", "about svelte-8m4wcx");
+    			add_location(about, file, 25, 1, 560);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, about, anchor);
+    			append_dev(about, div0);
+    			append_dev(div0, section0);
+    			append_dev(section0, h20);
+    			append_dev(section0, t1);
+    			append_dev(section0, p0);
+    			append_dev(p0, t2);
+    			append_dev(p0, a);
+    			append_dev(p0, t4);
+    			/*section0_binding*/ ctx[3](section0);
+    			append_dev(div0, t5);
+    			append_dev(div0, section1);
+    			append_dev(section1, h21);
+    			append_dev(section1, t7);
+    			append_dev(section1, img0);
+    			append_dev(section1, t8);
+    			append_dev(section1, strong0);
+    			append_dev(section1, p1);
+    			append_dev(section1, t11);
+    			append_dev(section1, strong1);
+    			append_dev(section1, p2);
+    			append_dev(about, t14);
+    			append_dev(about, div1);
+    			append_dev(div1, section2);
+    			append_dev(section2, h22);
+    			append_dev(section2, t16);
+    			append_dev(section2, img1);
+    			append_dev(section2, t17);
+    			append_dev(section2, p3);
+    			append_dev(section2, t19);
+    			append_dev(section2, p4);
+    			append_dev(div1, t21);
+    			append_dev(div1, section3);
+    			append_dev(section3, h23);
+    			append_dev(section3, t23);
+    			append_dev(section3, p5);
+    			/*section3_binding*/ ctx[7](section3);
+    			current = true;
+
+    			if (!mounted) {
+    				dispose = [
+    					listen_dev(section0, "mousedown", /*mousedown_handler*/ ctx[4], false, false, false),
+    					listen_dev(section0, "touchmove", /*touchmove_handler*/ ctx[5], false, false, false),
+    					listen_dev(section0, "mousemove", /*mousemove_handler*/ ctx[6], false, false, false),
+    					listen_dev(section3, "mousemove", /*mousemove_handler_1*/ ctx[8], false, false, false)
+    				];
+
+    				mounted = true;
+    			}
+    		},
+    		p: noop,
+    		i: function intro(local) {
+    			if (current) return;
+
+    			add_render_callback(() => {
+    				if (!about_transition) about_transition = create_bidirectional_transition(about, fade, {}, true);
+    				about_transition.run(1);
+    			});
+
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			if (!about_transition) about_transition = create_bidirectional_transition(about, fade, {}, false);
+    			about_transition.run(0);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(about);
+    			/*section0_binding*/ ctx[3](null);
+    			/*section3_binding*/ ctx[7](null);
+    			if (detaching && about_transition) about_transition.end();
+    			mounted = false;
+    			run_all(dispose);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots("About", slots, []);
+    	let { skillsEl } = $$props;
+    	let { whoEl } = $$props;
+
+    	const handleMousemove = (event, element) => {
+    		let rect = event.target.getBoundingClientRect();
+    		let x = event.clientX - rect.left;
+    		let y = event.clientY - rect.top;
+
+    		if (element === "skills") {
+    			skillsEl.style.setProperty("--x", x + "px");
+    			skillsEl.style.setProperty("--y", y + "px");
+    		}
+
+    		if (element === "who") {
+    			whoEl.style.setProperty("--x", x + "px");
+    			whoEl.style.setProperty("--y", y + "px");
+    		}
+    	};
+
+    	const writable_props = ["skillsEl", "whoEl"];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<About> was created with unknown prop '${key}'`);
+    	});
+
+    	function section0_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			whoEl = $$value;
+    			$$invalidate(1, whoEl);
+    		});
+    	}
+
+    	const mousedown_handler = e => handleMousemove(e, "who");
+    	const touchmove_handler = e => handleMousemove(e, "who");
+    	const mousemove_handler = e => handleMousemove(e, "who");
+
+    	function section3_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			skillsEl = $$value;
+    			$$invalidate(0, skillsEl);
+    		});
+    	}
+
+    	const mousemove_handler_1 = e => handleMousemove(e, "skills");
+
+    	$$self.$$set = $$props => {
+    		if ("skillsEl" in $$props) $$invalidate(0, skillsEl = $$props.skillsEl);
+    		if ("whoEl" in $$props) $$invalidate(1, whoEl = $$props.whoEl);
+    	};
+
+    	$$self.$capture_state = () => ({ fade, skillsEl, whoEl, handleMousemove });
+
+    	$$self.$inject_state = $$props => {
+    		if ("skillsEl" in $$props) $$invalidate(0, skillsEl = $$props.skillsEl);
+    		if ("whoEl" in $$props) $$invalidate(1, whoEl = $$props.whoEl);
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [
+    		skillsEl,
+    		whoEl,
+    		handleMousemove,
+    		section0_binding,
+    		mousedown_handler,
+    		touchmove_handler,
+    		mousemove_handler,
+    		section3_binding,
+    		mousemove_handler_1
+    	];
+    }
+
+    class About extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance, create_fragment, safe_not_equal, { skillsEl: 0, whoEl: 1 });
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "About",
+    			options,
+    			id: create_fragment.name
+    		});
+
+    		const { ctx } = this.$$;
+    		const props = options.props || {};
+
+    		if (/*skillsEl*/ ctx[0] === undefined && !("skillsEl" in props)) {
+    			console.warn("<About> was created without expected prop 'skillsEl'");
+    		}
+
+    		if (/*whoEl*/ ctx[1] === undefined && !("whoEl" in props)) {
+    			console.warn("<About> was created without expected prop 'whoEl'");
+    		}
+    	}
+
+    	get skillsEl() {
+    		throw new Error("<About>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set skillsEl(value) {
+    		throw new Error("<About>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get whoEl() {
+    		throw new Error("<About>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set whoEl(value) {
+    		throw new Error("<About>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+    }
+
+    /* src\Nav.svelte generated by Svelte v3.25.0 */
+
+    const file$1 = "src\\Nav.svelte";
+
+    function create_fragment$1(ctx) {
+    	let nav;
+    	let div0;
+    	let t0;
+    	let div0_class_value;
+    	let t1;
+    	let div1;
+    	let t2;
+    	let div1_class_value;
+    	let mounted;
+    	let dispose;
+
+    	const block = {
+    		c: function create() {
+    			nav = element("nav");
+    			div0 = element("div");
+    			t0 = text("About");
+    			t1 = space();
+    			div1 = element("div");
+    			t2 = text("Portfolio");
+
+    			attr_dev(div0, "class", div0_class_value = "" + (null_to_empty(!/*showAbout*/ ctx[0]
+    			? "about"
+    			: "about over-option-nav") + " svelte-15apge1"));
+
+    			add_location(div0, file$1, 1, 4, 11);
+
+    			attr_dev(div1, "class", div1_class_value = "" + (null_to_empty(/*showAbout*/ ctx[0]
+    			? "portfolio"
+    			: "portfolio over-option-nav") + " svelte-15apge1"));
+
+    			add_location(div1, file$1, 4, 4, 138);
+    			attr_dev(nav, "class", "svelte-15apge1");
+    			add_location(nav, file$1, 0, 0, 0);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, nav, anchor);
+    			append_dev(nav, div0);
+    			append_dev(div0, t0);
+    			append_dev(nav, t1);
+    			append_dev(nav, div1);
+    			append_dev(div1, t2);
+
+    			if (!mounted) {
+    				dispose = [
+    					listen_dev(div0, "click", /*click_handler*/ ctx[2], false, false, false),
+    					listen_dev(div1, "click", /*click_handler_1*/ ctx[3], false, false, false)
+    				];
+
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, [dirty]) {
+    			if (dirty & /*showAbout*/ 1 && div0_class_value !== (div0_class_value = "" + (null_to_empty(!/*showAbout*/ ctx[0]
+    			? "about"
+    			: "about over-option-nav") + " svelte-15apge1"))) {
+    				attr_dev(div0, "class", div0_class_value);
+    			}
+
+    			if (dirty & /*showAbout*/ 1 && div1_class_value !== (div1_class_value = "" + (null_to_empty(/*showAbout*/ ctx[0]
+    			? "portfolio"
+    			: "portfolio over-option-nav") + " svelte-15apge1"))) {
+    				attr_dev(div1, "class", div1_class_value);
+    			}
+    		},
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(nav);
+    			mounted = false;
+    			run_all(dispose);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$1.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$1($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots("Nav", slots, []);
+    	let { showAbout = true } = $$props;
+
+    	//optimize in one function later
+    	const clickNav = option => {
+    		if (option === "about") {
+    			$$invalidate(0, showAbout = true);
+    		} else {
+    			$$invalidate(0, showAbout = false);
+    		}
+    	};
+
+    	const writable_props = ["showAbout"];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Nav> was created with unknown prop '${key}'`);
+    	});
+
+    	const click_handler = () => {
+    		clickNav("about");
+    	};
+
+    	const click_handler_1 = () => {
+    		clickNav("portfolio");
+    	};
+
+    	$$self.$$set = $$props => {
+    		if ("showAbout" in $$props) $$invalidate(0, showAbout = $$props.showAbout);
+    	};
+
+    	$$self.$capture_state = () => ({ showAbout, clickNav });
+
+    	$$self.$inject_state = $$props => {
+    		if ("showAbout" in $$props) $$invalidate(0, showAbout = $$props.showAbout);
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [showAbout, clickNav, click_handler, click_handler_1];
+    }
+
+    class Nav extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$1, create_fragment$1, safe_not_equal, { showAbout: 0 });
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Nav",
+    			options,
+    			id: create_fragment$1.name
+    		});
+    	}
+
+    	get showAbout() {
+    		throw new Error("<Nav>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set showAbout(value) {
+    		throw new Error("<Nav>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+    }
+
+    /* src\Footer.svelte generated by Svelte v3.25.0 */
+    const file$2 = "src\\Footer.svelte";
+
+    function create_fragment$2(ctx) {
+    	let footer;
+    	let div;
+    	let h4;
+
+    	const block = {
+    		c: function create() {
+    			footer = element("footer");
+    			div = element("div");
+    			h4 = element("h4");
+    			h4.textContent = "Copyright Sergio Posse 2020";
+    			add_location(h4, file$2, 6, 8, 117);
+    			attr_dev(div, "class", "copyright svelte-1w315ua");
+    			add_location(div, file$2, 5, 4, 84);
+    			attr_dev(footer, "class", "svelte-1w315ua");
+    			add_location(footer, file$2, 4, 0, 70);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, footer, anchor);
+    			append_dev(footer, div);
+    			append_dev(div, h4);
+    		},
+    		p: noop,
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(footer);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$2.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$2($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots("Footer", slots, []);
+    	const writable_props = [];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Footer> was created with unknown prop '${key}'`);
+    	});
+
+    	$$self.$capture_state = () => ({ fade });
+    	return [];
+    }
+
+    class Footer extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$2, create_fragment$2, safe_not_equal, {});
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Footer",
+    			options,
+    			id: create_fragment$2.name
+    		});
+    	}
+    }
+
+    /* src\Social.svelte generated by Svelte v3.25.0 */
+
+    const file$3 = "src\\Social.svelte";
+
+    function create_fragment$3(ctx) {
+    	let canvas;
+    	let t0;
+    	let social;
+    	let img0;
+    	let img0_src_value;
+    	let t1;
+    	let img1;
+    	let img1_src_value;
+    	let t2;
+    	let img2;
+    	let img2_src_value;
+    	let t3;
+    	let img3;
+    	let img3_src_value;
+    	let mounted;
+    	let dispose;
+
+    	const block = {
+    		c: function create() {
+    			canvas = element("canvas");
+    			t0 = space();
+    			social = element("social");
+    			img0 = element("img");
+    			t1 = space();
+    			img1 = element("img");
+    			t2 = space();
+    			img2 = element("img");
+    			t3 = space();
+    			img3 = element("img");
+    			attr_dev(canvas, "class", "svelte-4z9cqy");
+    			add_location(canvas, file$3, 5, 0, 85);
+    			if (img0.src !== (img0_src_value = "/images/whatsapp.png")) attr_dev(img0, "src", img0_src_value);
+    			attr_dev(img0, "alt", "whatsapp");
+    			attr_dev(img0, "class", "svelte-4z9cqy");
+    			add_location(img0, file$3, 7, 4, 170);
+    			set_style(img1, "filter", "invert()");
+    			if (img1.src !== (img1_src_value = "/images/github.png")) attr_dev(img1, "src", img1_src_value);
+    			attr_dev(img1, "alt", "github");
+    			attr_dev(img1, "class", "svelte-4z9cqy");
+    			add_location(img1, file$3, 8, 4, 287);
+    			if (img2.src !== (img2_src_value = "/images/instagram.png")) attr_dev(img2, "src", img2_src_value);
+    			attr_dev(img2, "alt", "instagram");
+    			attr_dev(img2, "class", "svelte-4z9cqy");
+    			add_location(img2, file$3, 9, 4, 430);
+    			if (img3.src !== (img3_src_value = "/images/cv.png")) attr_dev(img3, "src", img3_src_value);
+    			attr_dev(img3, "alt", "github");
+    			attr_dev(img3, "class", "svelte-4z9cqy");
+    			add_location(img3, file$3, 10, 4, 556);
+    			attr_dev(social, "class", "svelte-4z9cqy");
+    			add_location(social, file$3, 6, 0, 133);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, canvas, anchor);
+    			/*canvas_binding*/ ctx[2](canvas);
+    			insert_dev(target, t0, anchor);
+    			insert_dev(target, social, anchor);
+    			append_dev(social, img0);
+    			append_dev(social, t1);
+    			append_dev(social, img1);
+    			append_dev(social, t2);
+    			append_dev(social, img2);
+    			append_dev(social, t3);
+    			append_dev(social, img3);
+    			/*social_binding*/ ctx[7](social);
+
+    			if (!mounted) {
+    				dispose = [
+    					listen_dev(img0, "click", /*click_handler*/ ctx[3], false, false, false),
+    					listen_dev(img1, "click", /*click_handler_1*/ ctx[4], false, false, false),
+    					listen_dev(img2, "click", /*click_handler_2*/ ctx[5], false, false, false),
+    					listen_dev(img3, "click", /*click_handler_3*/ ctx[6], false, false, false)
+    				];
+
+    				mounted = true;
+    			}
+    		},
+    		p: noop,
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(canvas);
+    			/*canvas_binding*/ ctx[2](null);
+    			if (detaching) detach_dev(t0);
+    			if (detaching) detach_dev(social);
+    			/*social_binding*/ ctx[7](null);
+    			mounted = false;
+    			run_all(dispose);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$3.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$3($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots("Social", slots, []);
+    	let { canvasSocialSide } = $$props;
+    	let { socialSide } = $$props;
+    	const writable_props = ["canvasSocialSide", "socialSide"];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console.warn(`<Social> was created with unknown prop '${key}'`);
+    	});
+
+    	function canvas_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			canvasSocialSide = $$value;
+    			$$invalidate(0, canvasSocialSide);
+    		});
+    	}
+
+    	const click_handler = () => {
+    		window.open("https://wa.me/5493584849720");
+    	};
+
+    	const click_handler_1 = () => {
+    		window.open("https://github.com/SergioPosse");
+    	};
+
+    	const click_handler_2 = () => {
+    		window.open("https://instagram.com/ssergio.posse");
+    	};
+
+    	const click_handler_3 = () => {
+    		window.open("https://drive.google.com/file/d/1Dg5-hSmZ-FTeistvXn830X6BkWclCDDx/view?usp=sharing");
+    	};
+
+    	function social_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			socialSide = $$value;
+    			$$invalidate(1, socialSide);
+    		});
+    	}
+
+    	$$self.$$set = $$props => {
+    		if ("canvasSocialSide" in $$props) $$invalidate(0, canvasSocialSide = $$props.canvasSocialSide);
+    		if ("socialSide" in $$props) $$invalidate(1, socialSide = $$props.socialSide);
+    	};
+
+    	$$self.$capture_state = () => ({ canvasSocialSide, socialSide });
+
+    	$$self.$inject_state = $$props => {
+    		if ("canvasSocialSide" in $$props) $$invalidate(0, canvasSocialSide = $$props.canvasSocialSide);
+    		if ("socialSide" in $$props) $$invalidate(1, socialSide = $$props.socialSide);
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [
+    		canvasSocialSide,
+    		socialSide,
+    		canvas_binding,
+    		click_handler,
+    		click_handler_1,
+    		click_handler_2,
+    		click_handler_3,
+    		social_binding
+    	];
+    }
+
+    class Social extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$3, create_fragment$3, safe_not_equal, { canvasSocialSide: 0, socialSide: 1 });
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Social",
+    			options,
+    			id: create_fragment$3.name
+    		});
+
+    		const { ctx } = this.$$;
+    		const props = options.props || {};
+
+    		if (/*canvasSocialSide*/ ctx[0] === undefined && !("canvasSocialSide" in props)) {
+    			console.warn("<Social> was created without expected prop 'canvasSocialSide'");
+    		}
+
+    		if (/*socialSide*/ ctx[1] === undefined && !("socialSide" in props)) {
+    			console.warn("<Social> was created without expected prop 'socialSide'");
+    		}
+    	}
+
+    	get canvasSocialSide() {
+    		throw new Error("<Social>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set canvasSocialSide(value) {
+    		throw new Error("<Social>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get socialSide() {
+    		throw new Error("<Social>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set socialSide(value) {
+    		throw new Error("<Social>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+    }
+
+    function createCommonjsModule(fn, basedir, module) {
+    	return module = {
+    	  path: basedir,
+    	  exports: {},
+    	  require: function (path, base) {
+          return commonjsRequire(path, (base === undefined || base === null) ? module.path : base);
+        }
+    	}, fn(module, module.exports), module.exports;
+    }
+
+    function commonjsRequire () {
+    	throw new Error('Dynamic requires are not currently supported by @rollup/plugin-commonjs');
+    }
+
+    var collectionUtils = createCommonjsModule(function (module) {
+
+    var utils = module.exports = {};
+
+    /**
+     * Loops through the collection and calls the callback for each element. if the callback returns truthy, the loop is broken and returns the same value.
+     * @public
+     * @param {*} collection The collection to loop through. Needs to have a length property set and have indices set from 0 to length - 1.
+     * @param {function} callback The callback to be called for each element. The element will be given as a parameter to the callback. If this callback returns truthy, the loop is broken and the same value is returned.
+     * @returns {*} The value that a callback has returned (if truthy). Otherwise nothing.
+     */
+    utils.forEach = function(collection, callback) {
+        for(var i = 0; i < collection.length; i++) {
+            var result = callback(collection[i]);
+            if(result) {
+                return result;
+            }
+        }
+    };
+    });
+
+    var elementUtils = function(options) {
+        var getState = options.stateHandler.getState;
+
+        /**
+         * Tells if the element has been made detectable and ready to be listened for resize events.
+         * @public
+         * @param {element} The element to check.
+         * @returns {boolean} True or false depending on if the element is detectable or not.
+         */
+        function isDetectable(element) {
+            var state = getState(element);
+            return state && !!state.isDetectable;
+        }
+
+        /**
+         * Marks the element that it has been made detectable and ready to be listened for resize events.
+         * @public
+         * @param {element} The element to mark.
+         */
+        function markAsDetectable(element) {
+            getState(element).isDetectable = true;
+        }
+
+        /**
+         * Tells if the element is busy or not.
+         * @public
+         * @param {element} The element to check.
+         * @returns {boolean} True or false depending on if the element is busy or not.
+         */
+        function isBusy(element) {
+            return !!getState(element).busy;
+        }
+
+        /**
+         * Marks the object is busy and should not be made detectable.
+         * @public
+         * @param {element} element The element to mark.
+         * @param {boolean} busy If the element is busy or not.
+         */
+        function markBusy(element, busy) {
+            getState(element).busy = !!busy;
+        }
+
+        return {
+            isDetectable: isDetectable,
+            markAsDetectable: markAsDetectable,
+            isBusy: isBusy,
+            markBusy: markBusy
+        };
+    };
+
+    var listenerHandler = function(idHandler) {
+        var eventListeners = {};
+
+        /**
+         * Gets all listeners for the given element.
+         * @public
+         * @param {element} element The element to get all listeners for.
+         * @returns All listeners for the given element.
+         */
+        function getListeners(element) {
+            var id = idHandler.get(element);
+
+            if (id === undefined) {
+                return [];
+            }
+
+            return eventListeners[id] || [];
+        }
+
+        /**
+         * Stores the given listener for the given element. Will not actually add the listener to the element.
+         * @public
+         * @param {element} element The element that should have the listener added.
+         * @param {function} listener The callback that the element has added.
+         */
+        function addListener(element, listener) {
+            var id = idHandler.get(element);
+
+            if(!eventListeners[id]) {
+                eventListeners[id] = [];
+            }
+
+            eventListeners[id].push(listener);
+        }
+
+        function removeListener(element, listener) {
+            var listeners = getListeners(element);
+            for (var i = 0, len = listeners.length; i < len; ++i) {
+                if (listeners[i] === listener) {
+                  listeners.splice(i, 1);
+                  break;
+                }
+            }
+        }
+
+        function removeAllListeners(element) {
+          var listeners = getListeners(element);
+          if (!listeners) { return; }
+          listeners.length = 0;
+        }
+
+        return {
+            get: getListeners,
+            add: addListener,
+            removeListener: removeListener,
+            removeAllListeners: removeAllListeners
+        };
+    };
+
+    var idGenerator = function() {
+        var idCount = 1;
+
+        /**
+         * Generates a new unique id in the context.
+         * @public
+         * @returns {number} A unique id in the context.
+         */
+        function generate() {
+            return idCount++;
+        }
+
+        return {
+            generate: generate
+        };
+    };
+
+    var idHandler = function(options) {
+        var idGenerator     = options.idGenerator;
+        var getState        = options.stateHandler.getState;
+
+        /**
+         * Gets the resize detector id of the element.
+         * @public
+         * @param {element} element The target element to get the id of.
+         * @returns {string|number|null} The id of the element. Null if it has no id.
+         */
+        function getId(element) {
+            var state = getState(element);
+
+            if (state && state.id !== undefined) {
+                return state.id;
+            }
+
+            return null;
+        }
+
+        /**
+         * Sets the resize detector id of the element. Requires the element to have a resize detector state initialized.
+         * @public
+         * @param {element} element The target element to set the id of.
+         * @returns {string|number|null} The id of the element.
+         */
+        function setId(element) {
+            var state = getState(element);
+
+            if (!state) {
+                throw new Error("setId required the element to have a resize detection state.");
+            }
+
+            var id = idGenerator.generate();
+
+            state.id = id;
+
+            return id;
+        }
+
+        return {
+            get: getId,
+            set: setId
+        };
+    };
+
+    /* global console: false */
+
+    /**
+     * Reporter that handles the reporting of logs, warnings and errors.
+     * @public
+     * @param {boolean} quiet Tells if the reporter should be quiet or not.
+     */
+    var reporter = function(quiet) {
+        function noop() {
+            //Does nothing.
+        }
+
+        var reporter = {
+            log: noop,
+            warn: noop,
+            error: noop
+        };
+
+        if(!quiet && window.console) {
+            var attachFunction = function(reporter, name) {
+                //The proxy is needed to be able to call the method with the console context,
+                //since we cannot use bind.
+                reporter[name] = function reporterProxy() {
+                    var f = console[name];
+                    if (f.apply) { //IE9 does not support console.log.apply :)
+                        f.apply(console, arguments);
+                    } else {
+                        for (var i = 0; i < arguments.length; i++) {
+                            f(arguments[i]);
+                        }
+                    }
+                };
+            };
+
+            attachFunction(reporter, "log");
+            attachFunction(reporter, "warn");
+            attachFunction(reporter, "error");
+        }
+
+        return reporter;
+    };
+
+    var browserDetector = createCommonjsModule(function (module) {
+
+    var detector = module.exports = {};
+
+    detector.isIE = function(version) {
+        function isAnyIeVersion() {
+            var agent = navigator.userAgent.toLowerCase();
+            return agent.indexOf("msie") !== -1 || agent.indexOf("trident") !== -1 || agent.indexOf(" edge/") !== -1;
+        }
+
+        if(!isAnyIeVersion()) {
+            return false;
+        }
+
+        if(!version) {
+            return true;
+        }
+
+        //Shamelessly stolen from https://gist.github.com/padolsey/527683
+        var ieVersion = (function(){
+            var undef,
+                v = 3,
+                div = document.createElement("div"),
+                all = div.getElementsByTagName("i");
+
+            do {
+                div.innerHTML = "<!--[if gt IE " + (++v) + "]><i></i><![endif]-->";
+            }
+            while (all[0]);
+
+            return v > 4 ? v : undef;
+        }());
+
+        return version === ieVersion;
+    };
+
+    detector.isLegacyOpera = function() {
+        return !!window.opera;
+    };
+    });
+
+    var utils_1 = createCommonjsModule(function (module) {
+
+    var utils = module.exports = {};
+
+    utils.getOption = getOption;
+
+    function getOption(options, name, defaultValue) {
+        var value = options[name];
+
+        if((value === undefined || value === null) && defaultValue !== undefined) {
+            return defaultValue;
+        }
+
+        return value;
+    }
+    });
+
+    var batchProcessor = function batchProcessorMaker(options) {
+        options             = options || {};
+        var reporter        = options.reporter;
+        var asyncProcess    = utils_1.getOption(options, "async", true);
+        var autoProcess     = utils_1.getOption(options, "auto", true);
+
+        if(autoProcess && !asyncProcess) {
+            reporter && reporter.warn("Invalid options combination. auto=true and async=false is invalid. Setting async=true.");
+            asyncProcess = true;
+        }
+
+        var batch = Batch();
+        var asyncFrameHandler;
+        var isProcessing = false;
+
+        function addFunction(level, fn) {
+            if(!isProcessing && autoProcess && asyncProcess && batch.size() === 0) {
+                // Since this is async, it is guaranteed to be executed after that the fn is added to the batch.
+                // This needs to be done before, since we're checking the size of the batch to be 0.
+                processBatchAsync();
+            }
+
+            batch.add(level, fn);
+        }
+
+        function processBatch() {
+            // Save the current batch, and create a new batch so that incoming functions are not added into the currently processing batch.
+            // Continue processing until the top-level batch is empty (functions may be added to the new batch while processing, and so on).
+            isProcessing = true;
+            while (batch.size()) {
+                var processingBatch = batch;
+                batch = Batch();
+                processingBatch.process();
+            }
+            isProcessing = false;
+        }
+
+        function forceProcessBatch(localAsyncProcess) {
+            if (isProcessing) {
+                return;
+            }
+
+            if(localAsyncProcess === undefined) {
+                localAsyncProcess = asyncProcess;
+            }
+
+            if(asyncFrameHandler) {
+                cancelFrame(asyncFrameHandler);
+                asyncFrameHandler = null;
+            }
+
+            if(localAsyncProcess) {
+                processBatchAsync();
+            } else {
+                processBatch();
+            }
+        }
+
+        function processBatchAsync() {
+            asyncFrameHandler = requestFrame(processBatch);
+        }
+
+        function cancelFrame(listener) {
+            // var cancel = window.cancelAnimationFrame || window.mozCancelAnimationFrame || window.webkitCancelAnimationFrame || window.clearTimeout;
+            var cancel = clearTimeout;
+            return cancel(listener);
+        }
+
+        function requestFrame(callback) {
+            // var raf = window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame || function(fn) { return window.setTimeout(fn, 20); };
+            var raf = function(fn) { return setTimeout(fn, 0); };
+            return raf(callback);
+        }
+
+        return {
+            add: addFunction,
+            force: forceProcessBatch
+        };
+    };
+
+    function Batch() {
+        var batch       = {};
+        var size        = 0;
+        var topLevel    = 0;
+        var bottomLevel = 0;
+
+        function add(level, fn) {
+            if(!fn) {
+                fn = level;
+                level = 0;
+            }
+
+            if(level > topLevel) {
+                topLevel = level;
+            } else if(level < bottomLevel) {
+                bottomLevel = level;
+            }
+
+            if(!batch[level]) {
+                batch[level] = [];
+            }
+
+            batch[level].push(fn);
+            size++;
+        }
+
+        function process() {
+            for(var level = bottomLevel; level <= topLevel; level++) {
+                var fns = batch[level];
+
+                for(var i = 0; i < fns.length; i++) {
+                    var fn = fns[i];
+                    fn();
+                }
+            }
+        }
+
+        function getSize() {
+            return size;
+        }
+
+        return {
+            add: add,
+            process: process,
+            size: getSize
+        };
+    }
+
+    var prop = "_erd";
+
+    function initState(element) {
+        element[prop] = {};
+        return getState(element);
+    }
+
+    function getState(element) {
+        return element[prop];
+    }
+
+    function cleanState(element) {
+        delete element[prop];
+    }
+
+    var stateHandler = {
+        initState: initState,
+        getState: getState,
+        cleanState: cleanState
+    };
+
+    var object = function(options) {
+        options             = options || {};
+        var reporter        = options.reporter;
+        var batchProcessor  = options.batchProcessor;
+        var getState        = options.stateHandler.getState;
+
+        if(!reporter) {
+            throw new Error("Missing required dependency: reporter.");
+        }
+
+        /**
+         * Adds a resize event listener to the element.
+         * @public
+         * @param {element} element The element that should have the listener added.
+         * @param {function} listener The listener callback to be called for each resize event of the element. The element will be given as a parameter to the listener callback.
+         */
+        function addListener(element, listener) {
+            function listenerProxy() {
+                listener(element);
+            }
+
+            if(browserDetector.isIE(8)) {
+                //IE 8 does not support object, but supports the resize event directly on elements.
+                getState(element).object = {
+                    proxy: listenerProxy
+                };
+                element.attachEvent("onresize", listenerProxy);
+            } else {
+                var object = getObject(element);
+
+                if(!object) {
+                    throw new Error("Element is not detectable by this strategy.");
+                }
+
+                object.contentDocument.defaultView.addEventListener("resize", listenerProxy);
+            }
+        }
+
+        function buildCssTextString(rules) {
+            var seperator = options.important ? " !important; " : "; ";
+
+            return (rules.join(seperator) + seperator).trim();
+        }
+
+        /**
+         * Makes an element detectable and ready to be listened for resize events. Will call the callback when the element is ready to be listened for resize changes.
+         * @private
+         * @param {object} options Optional options object.
+         * @param {element} element The element to make detectable
+         * @param {function} callback The callback to be called when the element is ready to be listened for resize changes. Will be called with the element as first parameter.
+         */
+        function makeDetectable(options, element, callback) {
+            if (!callback) {
+                callback = element;
+                element = options;
+                options = null;
+            }
+
+            options = options || {};
+            var debug = options.debug;
+
+            function injectObject(element, callback) {
+                var OBJECT_STYLE = buildCssTextString(["display: block", "position: absolute", "top: 0", "left: 0", "width: 100%", "height: 100%", "border: none", "padding: 0", "margin: 0", "opacity: 0", "z-index: -1000", "pointer-events: none"]);
+
+                //The target element needs to be positioned (everything except static) so the absolute positioned object will be positioned relative to the target element.
+
+                // Position altering may be performed directly or on object load, depending on if style resolution is possible directly or not.
+                var positionCheckPerformed = false;
+
+                // The element may not yet be attached to the DOM, and therefore the style object may be empty in some browsers.
+                // Since the style object is a reference, it will be updated as soon as the element is attached to the DOM.
+                var style = window.getComputedStyle(element);
+                var width = element.offsetWidth;
+                var height = element.offsetHeight;
+
+                getState(element).startSize = {
+                    width: width,
+                    height: height
+                };
+
+                function mutateDom() {
+                    function alterPositionStyles() {
+                        if(style.position === "static") {
+                            element.style.setProperty("position", "relative", options.important ? "important" : "");
+
+                            var removeRelativeStyles = function(reporter, element, style, property) {
+                                function getNumericalValue(value) {
+                                    return value.replace(/[^-\d\.]/g, "");
+                                }
+
+                                var value = style[property];
+
+                                if(value !== "auto" && getNumericalValue(value) !== "0") {
+                                    reporter.warn("An element that is positioned static has style." + property + "=" + value + " which is ignored due to the static positioning. The element will need to be positioned relative, so the style." + property + " will be set to 0. Element: ", element);
+                                    element.style.setProperty(property, "0", options.important ? "important" : "");
+                                }
+                            };
+
+                            //Check so that there are no accidental styles that will make the element styled differently now that is is relative.
+                            //If there are any, set them to 0 (this should be okay with the user since the style properties did nothing before [since the element was positioned static] anyway).
+                            removeRelativeStyles(reporter, element, style, "top");
+                            removeRelativeStyles(reporter, element, style, "right");
+                            removeRelativeStyles(reporter, element, style, "bottom");
+                            removeRelativeStyles(reporter, element, style, "left");
+                        }
+                    }
+
+                    function onObjectLoad() {
+                        // The object has been loaded, which means that the element now is guaranteed to be attached to the DOM.
+                        if (!positionCheckPerformed) {
+                            alterPositionStyles();
+                        }
+
+                        /*jshint validthis: true */
+
+                        function getDocument(element, callback) {
+                            //Opera 12 seem to call the object.onload before the actual document has been created.
+                            //So if it is not present, poll it with an timeout until it is present.
+                            //TODO: Could maybe be handled better with object.onreadystatechange or similar.
+                            if(!element.contentDocument) {
+                                var state = getState(element);
+                                if (state.checkForObjectDocumentTimeoutId) {
+                                    window.clearTimeout(state.checkForObjectDocumentTimeoutId);
+                                }
+                                state.checkForObjectDocumentTimeoutId = setTimeout(function checkForObjectDocument() {
+                                    state.checkForObjectDocumentTimeoutId = 0;
+                                    getDocument(element, callback);
+                                }, 100);
+
+                                return;
+                            }
+
+                            callback(element.contentDocument);
+                        }
+
+                        //Mutating the object element here seems to fire another load event.
+                        //Mutating the inner document of the object element is fine though.
+                        var objectElement = this;
+
+                        //Create the style element to be added to the object.
+                        getDocument(objectElement, function onObjectDocumentReady(objectDocument) {
+                            //Notify that the element is ready to be listened to.
+                            callback(element);
+                        });
+                    }
+
+                    // The element may be detached from the DOM, and some browsers does not support style resolving of detached elements.
+                    // The alterPositionStyles needs to be delayed until we know the element has been attached to the DOM (which we are sure of when the onObjectLoad has been fired), if style resolution is not possible.
+                    if (style.position !== "") {
+                        alterPositionStyles();
+                        positionCheckPerformed = true;
+                    }
+
+                    //Add an object element as a child to the target element that will be listened to for resize events.
+                    var object = document.createElement("object");
+                    object.style.cssText = OBJECT_STYLE;
+                    object.tabIndex = -1;
+                    object.type = "text/html";
+                    object.setAttribute("aria-hidden", "true");
+                    object.onload = onObjectLoad;
+
+                    //Safari: This must occur before adding the object to the DOM.
+                    //IE: Does not like that this happens before, even if it is also added after.
+                    if(!browserDetector.isIE()) {
+                        object.data = "about:blank";
+                    }
+
+                    if (!getState(element)) {
+                        // The element has been uninstalled before the actual loading happened.
+                        return;
+                    }
+
+                    element.appendChild(object);
+                    getState(element).object = object;
+
+                    //IE: This must occur after adding the object to the DOM.
+                    if(browserDetector.isIE()) {
+                        object.data = "about:blank";
+                    }
+                }
+
+                if(batchProcessor) {
+                    batchProcessor.add(mutateDom);
+                } else {
+                    mutateDom();
+                }
+            }
+
+            if(browserDetector.isIE(8)) {
+                //IE 8 does not support objects properly. Luckily they do support the resize event.
+                //So do not inject the object and notify that the element is already ready to be listened to.
+                //The event handler for the resize event is attached in the utils.addListener instead.
+                callback(element);
+            } else {
+                injectObject(element, callback);
+            }
+        }
+
+        /**
+         * Returns the child object of the target element.
+         * @private
+         * @param {element} element The target element.
+         * @returns The object element of the target.
+         */
+        function getObject(element) {
+            return getState(element).object;
+        }
+
+        function uninstall(element) {
+            if (!getState(element)) {
+                return;
+            }
+
+            var object = getObject(element);
+
+            if (!object) {
+                return;
+            }
+
+            if (browserDetector.isIE(8)) {
+                element.detachEvent("onresize", object.proxy);
+            } else {
+                element.removeChild(object);
+            }
+
+            if (getState(element).checkForObjectDocumentTimeoutId) {
+                window.clearTimeout(getState(element).checkForObjectDocumentTimeoutId);
+            }
+
+            delete getState(element).object;
+        }
+
+        return {
+            makeDetectable: makeDetectable,
+            addListener: addListener,
+            uninstall: uninstall
+        };
+    };
+
+    var forEach = collectionUtils.forEach;
+
+    var scroll = function(options) {
+        options             = options || {};
+        var reporter        = options.reporter;
+        var batchProcessor  = options.batchProcessor;
+        var getState        = options.stateHandler.getState;
+        var hasState        = options.stateHandler.hasState;
+        var idHandler       = options.idHandler;
+
+        if (!batchProcessor) {
+            throw new Error("Missing required dependency: batchProcessor");
+        }
+
+        if (!reporter) {
+            throw new Error("Missing required dependency: reporter.");
+        }
+
+        //TODO: Could this perhaps be done at installation time?
+        var scrollbarSizes = getScrollbarSizes();
+
+        var styleId = "erd_scroll_detection_scrollbar_style";
+        var detectionContainerClass = "erd_scroll_detection_container";
+
+        function initDocument(targetDocument) {
+            // Inject the scrollbar styling that prevents them from appearing sometimes in Chrome.
+            // The injected container needs to have a class, so that it may be styled with CSS (pseudo elements).
+            injectScrollStyle(targetDocument, styleId, detectionContainerClass);
+        }
+
+        initDocument(window.document);
+
+        function buildCssTextString(rules) {
+            var seperator = options.important ? " !important; " : "; ";
+
+            return (rules.join(seperator) + seperator).trim();
+        }
+
+        function getScrollbarSizes() {
+            var width = 500;
+            var height = 500;
+
+            var child = document.createElement("div");
+            child.style.cssText = buildCssTextString(["position: absolute", "width: " + width*2 + "px", "height: " + height*2 + "px", "visibility: hidden", "margin: 0", "padding: 0"]);
+
+            var container = document.createElement("div");
+            container.style.cssText = buildCssTextString(["position: absolute", "width: " + width + "px", "height: " + height + "px", "overflow: scroll", "visibility: none", "top: " + -width*3 + "px", "left: " + -height*3 + "px", "visibility: hidden", "margin: 0", "padding: 0"]);
+
+            container.appendChild(child);
+
+            document.body.insertBefore(container, document.body.firstChild);
+
+            var widthSize = width - container.clientWidth;
+            var heightSize = height - container.clientHeight;
+
+            document.body.removeChild(container);
+
+            return {
+                width: widthSize,
+                height: heightSize
+            };
+        }
+
+        function injectScrollStyle(targetDocument, styleId, containerClass) {
+            function injectStyle(style, method) {
+                method = method || function (element) {
+                    targetDocument.head.appendChild(element);
+                };
+
+                var styleElement = targetDocument.createElement("style");
+                styleElement.innerHTML = style;
+                styleElement.id = styleId;
+                method(styleElement);
+                return styleElement;
+            }
+
+            if (!targetDocument.getElementById(styleId)) {
+                var containerAnimationClass = containerClass + "_animation";
+                var containerAnimationActiveClass = containerClass + "_animation_active";
+                var style = "/* Created by the element-resize-detector library. */\n";
+                style += "." + containerClass + " > div::-webkit-scrollbar { " + buildCssTextString(["display: none"]) + " }\n\n";
+                style += "." + containerAnimationActiveClass + " { " + buildCssTextString(["-webkit-animation-duration: 0.1s", "animation-duration: 0.1s", "-webkit-animation-name: " + containerAnimationClass, "animation-name: " + containerAnimationClass]) + " }\n";
+                style += "@-webkit-keyframes " + containerAnimationClass +  " { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }\n";
+                style += "@keyframes " + containerAnimationClass +          " { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }";
+                injectStyle(style);
+            }
+        }
+
+        function addAnimationClass(element) {
+            element.className += " " + detectionContainerClass + "_animation_active";
+        }
+
+        function addEvent(el, name, cb) {
+            if (el.addEventListener) {
+                el.addEventListener(name, cb);
+            } else if(el.attachEvent) {
+                el.attachEvent("on" + name, cb);
+            } else {
+                return reporter.error("[scroll] Don't know how to add event listeners.");
+            }
+        }
+
+        function removeEvent(el, name, cb) {
+            if (el.removeEventListener) {
+                el.removeEventListener(name, cb);
+            } else if(el.detachEvent) {
+                el.detachEvent("on" + name, cb);
+            } else {
+                return reporter.error("[scroll] Don't know how to remove event listeners.");
+            }
+        }
+
+        function getExpandElement(element) {
+            return getState(element).container.childNodes[0].childNodes[0].childNodes[0];
+        }
+
+        function getShrinkElement(element) {
+            return getState(element).container.childNodes[0].childNodes[0].childNodes[1];
+        }
+
+        /**
+         * Adds a resize event listener to the element.
+         * @public
+         * @param {element} element The element that should have the listener added.
+         * @param {function} listener The listener callback to be called for each resize event of the element. The element will be given as a parameter to the listener callback.
+         */
+        function addListener(element, listener) {
+            var listeners = getState(element).listeners;
+
+            if (!listeners.push) {
+                throw new Error("Cannot add listener to an element that is not detectable.");
+            }
+
+            getState(element).listeners.push(listener);
+        }
+
+        /**
+         * Makes an element detectable and ready to be listened for resize events. Will call the callback when the element is ready to be listened for resize changes.
+         * @private
+         * @param {object} options Optional options object.
+         * @param {element} element The element to make detectable
+         * @param {function} callback The callback to be called when the element is ready to be listened for resize changes. Will be called with the element as first parameter.
+         */
+        function makeDetectable(options, element, callback) {
+            if (!callback) {
+                callback = element;
+                element = options;
+                options = null;
+            }
+
+            options = options || {};
+
+            function debug() {
+                if (options.debug) {
+                    var args = Array.prototype.slice.call(arguments);
+                    args.unshift(idHandler.get(element), "Scroll: ");
+                    if (reporter.log.apply) {
+                        reporter.log.apply(null, args);
+                    } else {
+                        for (var i = 0; i < args.length; i++) {
+                            reporter.log(args[i]);
+                        }
+                    }
+                }
+            }
+
+            function isDetached(element) {
+                function isInDocument(element) {
+                    return element === element.ownerDocument.body || element.ownerDocument.body.contains(element);
+                }
+
+                if (!isInDocument(element)) {
+                    return true;
+                }
+
+                // FireFox returns null style in hidden iframes. See https://github.com/wnr/element-resize-detector/issues/68 and https://bugzilla.mozilla.org/show_bug.cgi?id=795520
+                if (window.getComputedStyle(element) === null) {
+                    return true;
+                }
+
+                return false;
+            }
+
+            function isUnrendered(element) {
+                // Check the absolute positioned container since the top level container is display: inline.
+                var container = getState(element).container.childNodes[0];
+                var style = window.getComputedStyle(container);
+                return !style.width || style.width.indexOf("px") === -1; //Can only compute pixel value when rendered.
+            }
+
+            function getStyle() {
+                // Some browsers only force layouts when actually reading the style properties of the style object, so make sure that they are all read here,
+                // so that the user of the function can be sure that it will perform the layout here, instead of later (important for batching).
+                var elementStyle            = window.getComputedStyle(element);
+                var style                   = {};
+                style.position              = elementStyle.position;
+                style.width                 = element.offsetWidth;
+                style.height                = element.offsetHeight;
+                style.top                   = elementStyle.top;
+                style.right                 = elementStyle.right;
+                style.bottom                = elementStyle.bottom;
+                style.left                  = elementStyle.left;
+                style.widthCSS              = elementStyle.width;
+                style.heightCSS             = elementStyle.height;
+                return style;
+            }
+
+            function storeStartSize() {
+                var style = getStyle();
+                getState(element).startSize = {
+                    width: style.width,
+                    height: style.height
+                };
+                debug("Element start size", getState(element).startSize);
+            }
+
+            function initListeners() {
+                getState(element).listeners = [];
+            }
+
+            function storeStyle() {
+                debug("storeStyle invoked.");
+                if (!getState(element)) {
+                    debug("Aborting because element has been uninstalled");
+                    return;
+                }
+
+                var style = getStyle();
+                getState(element).style = style;
+            }
+
+            function storeCurrentSize(element, width, height) {
+                getState(element).lastWidth = width;
+                getState(element).lastHeight  = height;
+            }
+
+            function getExpandChildElement(element) {
+                return getExpandElement(element).childNodes[0];
+            }
+
+            function getWidthOffset() {
+                return 2 * scrollbarSizes.width + 1;
+            }
+
+            function getHeightOffset() {
+                return 2 * scrollbarSizes.height + 1;
+            }
+
+            function getExpandWidth(width) {
+                return width + 10 + getWidthOffset();
+            }
+
+            function getExpandHeight(height) {
+                return height + 10 + getHeightOffset();
+            }
+
+            function getShrinkWidth(width) {
+                return width * 2 + getWidthOffset();
+            }
+
+            function getShrinkHeight(height) {
+                return height * 2 + getHeightOffset();
+            }
+
+            function positionScrollbars(element, width, height) {
+                var expand          = getExpandElement(element);
+                var shrink          = getShrinkElement(element);
+                var expandWidth     = getExpandWidth(width);
+                var expandHeight    = getExpandHeight(height);
+                var shrinkWidth     = getShrinkWidth(width);
+                var shrinkHeight    = getShrinkHeight(height);
+                expand.scrollLeft   = expandWidth;
+                expand.scrollTop    = expandHeight;
+                shrink.scrollLeft   = shrinkWidth;
+                shrink.scrollTop    = shrinkHeight;
+            }
+
+            function injectContainerElement() {
+                var container = getState(element).container;
+
+                if (!container) {
+                    container                   = document.createElement("div");
+                    container.className         = detectionContainerClass;
+                    container.style.cssText     = buildCssTextString(["visibility: hidden", "display: inline", "width: 0px", "height: 0px", "z-index: -1", "overflow: hidden", "margin: 0", "padding: 0"]);
+                    getState(element).container = container;
+                    addAnimationClass(container);
+                    element.appendChild(container);
+
+                    var onAnimationStart = function () {
+                        getState(element).onRendered && getState(element).onRendered();
+                    };
+
+                    addEvent(container, "animationstart", onAnimationStart);
+
+                    // Store the event handler here so that they may be removed when uninstall is called.
+                    // See uninstall function for an explanation why it is needed.
+                    getState(element).onAnimationStart = onAnimationStart;
+                }
+
+                return container;
+            }
+
+            function injectScrollElements() {
+                function alterPositionStyles() {
+                    var style = getState(element).style;
+
+                    if(style.position === "static") {
+                        element.style.setProperty("position", "relative",options.important ? "important" : "");
+
+                        var removeRelativeStyles = function(reporter, element, style, property) {
+                            function getNumericalValue(value) {
+                                return value.replace(/[^-\d\.]/g, "");
+                            }
+
+                            var value = style[property];
+
+                            if(value !== "auto" && getNumericalValue(value) !== "0") {
+                                reporter.warn("An element that is positioned static has style." + property + "=" + value + " which is ignored due to the static positioning. The element will need to be positioned relative, so the style." + property + " will be set to 0. Element: ", element);
+                                element.style[property] = 0;
+                            }
+                        };
+
+                        //Check so that there are no accidental styles that will make the element styled differently now that is is relative.
+                        //If there are any, set them to 0 (this should be okay with the user since the style properties did nothing before [since the element was positioned static] anyway).
+                        removeRelativeStyles(reporter, element, style, "top");
+                        removeRelativeStyles(reporter, element, style, "right");
+                        removeRelativeStyles(reporter, element, style, "bottom");
+                        removeRelativeStyles(reporter, element, style, "left");
+                    }
+                }
+
+                function getLeftTopBottomRightCssText(left, top, bottom, right) {
+                    left = (!left ? "0" : (left + "px"));
+                    top = (!top ? "0" : (top + "px"));
+                    bottom = (!bottom ? "0" : (bottom + "px"));
+                    right = (!right ? "0" : (right + "px"));
+
+                    return ["left: " + left, "top: " + top, "right: " + right, "bottom: " + bottom];
+                }
+
+                debug("Injecting elements");
+
+                if (!getState(element)) {
+                    debug("Aborting because element has been uninstalled");
+                    return;
+                }
+
+                alterPositionStyles();
+
+                var rootContainer = getState(element).container;
+
+                if (!rootContainer) {
+                    rootContainer = injectContainerElement();
+                }
+
+                // Due to this WebKit bug https://bugs.webkit.org/show_bug.cgi?id=80808 (currently fixed in Blink, but still present in WebKit browsers such as Safari),
+                // we need to inject two containers, one that is width/height 100% and another that is left/top -1px so that the final container always is 1x1 pixels bigger than
+                // the targeted element.
+                // When the bug is resolved, "containerContainer" may be removed.
+
+                // The outer container can occasionally be less wide than the targeted when inside inline elements element in WebKit (see https://bugs.webkit.org/show_bug.cgi?id=152980).
+                // This should be no problem since the inner container either way makes sure the injected scroll elements are at least 1x1 px.
+
+                var scrollbarWidth          = scrollbarSizes.width;
+                var scrollbarHeight         = scrollbarSizes.height;
+                var containerContainerStyle = buildCssTextString(["position: absolute", "flex: none", "overflow: hidden", "z-index: -1", "visibility: hidden", "width: 100%", "height: 100%", "left: 0px", "top: 0px"]);
+                var containerStyle          = buildCssTextString(["position: absolute", "flex: none", "overflow: hidden", "z-index: -1", "visibility: hidden"].concat(getLeftTopBottomRightCssText(-(1 + scrollbarWidth), -(1 + scrollbarHeight), -scrollbarHeight, -scrollbarWidth)));
+                var expandStyle             = buildCssTextString(["position: absolute", "flex: none", "overflow: scroll", "z-index: -1", "visibility: hidden", "width: 100%", "height: 100%"]);
+                var shrinkStyle             = buildCssTextString(["position: absolute", "flex: none", "overflow: scroll", "z-index: -1", "visibility: hidden", "width: 100%", "height: 100%"]);
+                var expandChildStyle        = buildCssTextString(["position: absolute", "left: 0", "top: 0"]);
+                var shrinkChildStyle        = buildCssTextString(["position: absolute", "width: 200%", "height: 200%"]);
+
+                var containerContainer      = document.createElement("div");
+                var container               = document.createElement("div");
+                var expand                  = document.createElement("div");
+                var expandChild             = document.createElement("div");
+                var shrink                  = document.createElement("div");
+                var shrinkChild             = document.createElement("div");
+
+                // Some browsers choke on the resize system being rtl, so force it to ltr. https://github.com/wnr/element-resize-detector/issues/56
+                // However, dir should not be set on the top level container as it alters the dimensions of the target element in some browsers.
+                containerContainer.dir              = "ltr";
+
+                containerContainer.style.cssText    = containerContainerStyle;
+                containerContainer.className        = detectionContainerClass;
+                container.className                 = detectionContainerClass;
+                container.style.cssText             = containerStyle;
+                expand.style.cssText                = expandStyle;
+                expandChild.style.cssText           = expandChildStyle;
+                shrink.style.cssText                = shrinkStyle;
+                shrinkChild.style.cssText           = shrinkChildStyle;
+
+                expand.appendChild(expandChild);
+                shrink.appendChild(shrinkChild);
+                container.appendChild(expand);
+                container.appendChild(shrink);
+                containerContainer.appendChild(container);
+                rootContainer.appendChild(containerContainer);
+
+                function onExpandScroll() {
+                    getState(element).onExpand && getState(element).onExpand();
+                }
+
+                function onShrinkScroll() {
+                    getState(element).onShrink && getState(element).onShrink();
+                }
+
+                addEvent(expand, "scroll", onExpandScroll);
+                addEvent(shrink, "scroll", onShrinkScroll);
+
+                // Store the event handlers here so that they may be removed when uninstall is called.
+                // See uninstall function for an explanation why it is needed.
+                getState(element).onExpandScroll = onExpandScroll;
+                getState(element).onShrinkScroll = onShrinkScroll;
+            }
+
+            function registerListenersAndPositionElements() {
+                function updateChildSizes(element, width, height) {
+                    var expandChild             = getExpandChildElement(element);
+                    var expandWidth             = getExpandWidth(width);
+                    var expandHeight            = getExpandHeight(height);
+                    expandChild.style.setProperty("width", expandWidth + "px", options.important ? "important" : "");
+                    expandChild.style.setProperty("height", expandHeight + "px", options.important ? "important" : "");
+                }
+
+                function updateDetectorElements(done) {
+                    var width           = element.offsetWidth;
+                    var height          = element.offsetHeight;
+
+                    // Check whether the size has actually changed since last time the algorithm ran. If not, some steps may be skipped.
+                    var sizeChanged = width !== getState(element).lastWidth || height !== getState(element).lastHeight;
+
+                    debug("Storing current size", width, height);
+
+                    // Store the size of the element sync here, so that multiple scroll events may be ignored in the event listeners.
+                    // Otherwise the if-check in handleScroll is useless.
+                    storeCurrentSize(element, width, height);
+
+                    // Since we delay the processing of the batch, there is a risk that uninstall has been called before the batch gets to execute.
+                    // Since there is no way to cancel the fn executions, we need to add an uninstall guard to all fns of the batch.
+
+                    batchProcessor.add(0, function performUpdateChildSizes() {
+                        if (!sizeChanged) {
+                            return;
+                        }
+
+                        if (!getState(element)) {
+                            debug("Aborting because element has been uninstalled");
+                            return;
+                        }
+
+                        if (!areElementsInjected()) {
+                            debug("Aborting because element container has not been initialized");
+                            return;
+                        }
+
+                        if (options.debug) {
+                            var w = element.offsetWidth;
+                            var h = element.offsetHeight;
+
+                            if (w !== width || h !== height) {
+                                reporter.warn(idHandler.get(element), "Scroll: Size changed before updating detector elements.");
+                            }
+                        }
+
+                        updateChildSizes(element, width, height);
+                    });
+
+                    batchProcessor.add(1, function updateScrollbars() {
+                        // This function needs to be invoked event though the size is unchanged. The element could have been resized very quickly and then
+                        // been restored to the original size, which will have changed the scrollbar positions.
+
+                        if (!getState(element)) {
+                            debug("Aborting because element has been uninstalled");
+                            return;
+                        }
+
+                        if (!areElementsInjected()) {
+                            debug("Aborting because element container has not been initialized");
+                            return;
+                        }
+
+                        positionScrollbars(element, width, height);
+                    });
+
+                    if (sizeChanged && done) {
+                        batchProcessor.add(2, function () {
+                            if (!getState(element)) {
+                                debug("Aborting because element has been uninstalled");
+                                return;
+                            }
+
+                            if (!areElementsInjected()) {
+                              debug("Aborting because element container has not been initialized");
+                              return;
+                            }
+
+                            done();
+                        });
+                    }
+                }
+
+                function areElementsInjected() {
+                    return !!getState(element).container;
+                }
+
+                function notifyListenersIfNeeded() {
+                    function isFirstNotify() {
+                        return getState(element).lastNotifiedWidth === undefined;
+                    }
+
+                    debug("notifyListenersIfNeeded invoked");
+
+                    var state = getState(element);
+
+                    // Don't notify if the current size is the start size, and this is the first notification.
+                    if (isFirstNotify() && state.lastWidth === state.startSize.width && state.lastHeight === state.startSize.height) {
+                        return debug("Not notifying: Size is the same as the start size, and there has been no notification yet.");
+                    }
+
+                    // Don't notify if the size already has been notified.
+                    if (state.lastWidth === state.lastNotifiedWidth && state.lastHeight === state.lastNotifiedHeight) {
+                        return debug("Not notifying: Size already notified");
+                    }
+
+
+                    debug("Current size not notified, notifying...");
+                    state.lastNotifiedWidth = state.lastWidth;
+                    state.lastNotifiedHeight = state.lastHeight;
+                    forEach(getState(element).listeners, function (listener) {
+                        listener(element);
+                    });
+                }
+
+                function handleRender() {
+                    debug("startanimation triggered.");
+
+                    if (isUnrendered(element)) {
+                        debug("Ignoring since element is still unrendered...");
+                        return;
+                    }
+
+                    debug("Element rendered.");
+                    var expand = getExpandElement(element);
+                    var shrink = getShrinkElement(element);
+                    if (expand.scrollLeft === 0 || expand.scrollTop === 0 || shrink.scrollLeft === 0 || shrink.scrollTop === 0) {
+                        debug("Scrollbars out of sync. Updating detector elements...");
+                        updateDetectorElements(notifyListenersIfNeeded);
+                    }
+                }
+
+                function handleScroll() {
+                    debug("Scroll detected.");
+
+                    if (isUnrendered(element)) {
+                        // Element is still unrendered. Skip this scroll event.
+                        debug("Scroll event fired while unrendered. Ignoring...");
+                        return;
+                    }
+
+                    updateDetectorElements(notifyListenersIfNeeded);
+                }
+
+                debug("registerListenersAndPositionElements invoked.");
+
+                if (!getState(element)) {
+                    debug("Aborting because element has been uninstalled");
+                    return;
+                }
+
+                getState(element).onRendered = handleRender;
+                getState(element).onExpand = handleScroll;
+                getState(element).onShrink = handleScroll;
+
+                var style = getState(element).style;
+                updateChildSizes(element, style.width, style.height);
+            }
+
+            function finalizeDomMutation() {
+                debug("finalizeDomMutation invoked.");
+
+                if (!getState(element)) {
+                    debug("Aborting because element has been uninstalled");
+                    return;
+                }
+
+                var style = getState(element).style;
+                storeCurrentSize(element, style.width, style.height);
+                positionScrollbars(element, style.width, style.height);
+            }
+
+            function ready() {
+                callback(element);
+            }
+
+            function install() {
+                debug("Installing...");
+                initListeners();
+                storeStartSize();
+
+                batchProcessor.add(0, storeStyle);
+                batchProcessor.add(1, injectScrollElements);
+                batchProcessor.add(2, registerListenersAndPositionElements);
+                batchProcessor.add(3, finalizeDomMutation);
+                batchProcessor.add(4, ready);
+            }
+
+            debug("Making detectable...");
+
+            if (isDetached(element)) {
+                debug("Element is detached");
+
+                injectContainerElement();
+
+                debug("Waiting until element is attached...");
+
+                getState(element).onRendered = function () {
+                    debug("Element is now attached");
+                    install();
+                };
+            } else {
+                install();
+            }
+        }
+
+        function uninstall(element) {
+            var state = getState(element);
+
+            if (!state) {
+                // Uninstall has been called on a non-erd element.
+                return;
+            }
+
+            // Uninstall may have been called in the following scenarios:
+            // (1) Right between the sync code and async batch (here state.busy = true, but nothing have been registered or injected).
+            // (2) In the ready callback of the last level of the batch by another element (here, state.busy = true, but all the stuff has been injected).
+            // (3) After the installation process (here, state.busy = false and all the stuff has been injected).
+            // So to be on the safe side, let's check for each thing before removing.
+
+            // We need to remove the event listeners, because otherwise the event might fire on an uninstall element which results in an error when trying to get the state of the element.
+            state.onExpandScroll && removeEvent(getExpandElement(element), "scroll", state.onExpandScroll);
+            state.onShrinkScroll && removeEvent(getShrinkElement(element), "scroll", state.onShrinkScroll);
+            state.onAnimationStart && removeEvent(state.container, "animationstart", state.onAnimationStart);
+
+            state.container && element.removeChild(state.container);
+        }
+
+        return {
+            makeDetectable: makeDetectable,
+            addListener: addListener,
+            uninstall: uninstall,
+            initDocument: initDocument
+        };
+    };
+
+    var forEach$1                 = collectionUtils.forEach;
+
+
+
+
+
+
+
+
+
+    //Detection strategies.
+
+
+
+    function isCollection(obj) {
+        return Array.isArray(obj) || obj.length !== undefined;
+    }
+
+    function toArray(collection) {
+        if (!Array.isArray(collection)) {
+            var array = [];
+            forEach$1(collection, function (obj) {
+                array.push(obj);
+            });
+            return array;
+        } else {
+            return collection;
+        }
+    }
+
+    function isElement(obj) {
+        return obj && obj.nodeType === 1;
+    }
+
+    /**
+     * @typedef idHandler
+     * @type {object}
+     * @property {function} get Gets the resize detector id of the element.
+     * @property {function} set Generate and sets the resize detector id of the element.
+     */
+
+    /**
+     * @typedef Options
+     * @type {object}
+     * @property {boolean} callOnAdd    Determines if listeners should be called when they are getting added.
+                                        Default is true. If true, the listener is guaranteed to be called when it has been added.
+                                        If false, the listener will not be guarenteed to be called when it has been added (does not prevent it from being called).
+     * @property {idHandler} idHandler  A custom id handler that is responsible for generating, setting and retrieving id's for elements.
+                                        If not provided, a default id handler will be used.
+     * @property {reporter} reporter    A custom reporter that handles reporting logs, warnings and errors.
+                                        If not provided, a default id handler will be used.
+                                        If set to false, then nothing will be reported.
+     * @property {boolean} debug        If set to true, the the system will report debug messages as default for the listenTo method.
+     */
+
+    /**
+     * Creates an element resize detector instance.
+     * @public
+     * @param {Options?} options Optional global options object that will decide how this instance will work.
+     */
+    var elementResizeDetector = function(options) {
+        options = options || {};
+
+        //idHandler is currently not an option to the listenTo function, so it should not be added to globalOptions.
+        var idHandler$1;
+
+        if (options.idHandler) {
+            // To maintain compatability with idHandler.get(element, readonly), make sure to wrap the given idHandler
+            // so that readonly flag always is true when it's used here. This may be removed next major version bump.
+            idHandler$1 = {
+                get: function (element) { return options.idHandler.get(element, true); },
+                set: options.idHandler.set
+            };
+        } else {
+            var idGenerator$1 = idGenerator();
+            var defaultIdHandler = idHandler({
+                idGenerator: idGenerator$1,
+                stateHandler: stateHandler
+            });
+            idHandler$1 = defaultIdHandler;
+        }
+
+        //reporter is currently not an option to the listenTo function, so it should not be added to globalOptions.
+        var reporter$1 = options.reporter;
+
+        if(!reporter$1) {
+            //If options.reporter is false, then the reporter should be quiet.
+            var quiet = reporter$1 === false;
+            reporter$1 = reporter(quiet);
+        }
+
+        //batchProcessor is currently not an option to the listenTo function, so it should not be added to globalOptions.
+        var batchProcessor$1 = getOption(options, "batchProcessor", batchProcessor({ reporter: reporter$1 }));
+
+        //Options to be used as default for the listenTo function.
+        var globalOptions = {};
+        globalOptions.callOnAdd     = !!getOption(options, "callOnAdd", true);
+        globalOptions.debug         = !!getOption(options, "debug", false);
+
+        var eventListenerHandler    = listenerHandler(idHandler$1);
+        var elementUtils$1            = elementUtils({
+            stateHandler: stateHandler
+        });
+
+        //The detection strategy to be used.
+        var detectionStrategy;
+        var desiredStrategy = getOption(options, "strategy", "object");
+        var importantCssRules = getOption(options, "important", false);
+        var strategyOptions = {
+            reporter: reporter$1,
+            batchProcessor: batchProcessor$1,
+            stateHandler: stateHandler,
+            idHandler: idHandler$1,
+            important: importantCssRules
+        };
+
+        if(desiredStrategy === "scroll") {
+            if (browserDetector.isLegacyOpera()) {
+                reporter$1.warn("Scroll strategy is not supported on legacy Opera. Changing to object strategy.");
+                desiredStrategy = "object";
+            } else if (browserDetector.isIE(9)) {
+                reporter$1.warn("Scroll strategy is not supported on IE9. Changing to object strategy.");
+                desiredStrategy = "object";
+            }
+        }
+
+        if(desiredStrategy === "scroll") {
+            detectionStrategy = scroll(strategyOptions);
+        } else if(desiredStrategy === "object") {
+            detectionStrategy = object(strategyOptions);
+        } else {
+            throw new Error("Invalid strategy name: " + desiredStrategy);
+        }
+
+        //Calls can be made to listenTo with elements that are still being installed.
+        //Also, same elements can occur in the elements list in the listenTo function.
+        //With this map, the ready callbacks can be synchronized between the calls
+        //so that the ready callback can always be called when an element is ready - even if
+        //it wasn't installed from the function itself.
+        var onReadyCallbacks = {};
+
+        /**
+         * Makes the given elements resize-detectable and starts listening to resize events on the elements. Calls the event callback for each event for each element.
+         * @public
+         * @param {Options?} options Optional options object. These options will override the global options. Some options may not be overriden, such as idHandler.
+         * @param {element[]|element} elements The given array of elements to detect resize events of. Single element is also valid.
+         * @param {function} listener The callback to be executed for each resize event for each element.
+         */
+        function listenTo(options, elements, listener) {
+            function onResizeCallback(element) {
+                var listeners = eventListenerHandler.get(element);
+                forEach$1(listeners, function callListenerProxy(listener) {
+                    listener(element);
+                });
+            }
+
+            function addListener(callOnAdd, element, listener) {
+                eventListenerHandler.add(element, listener);
+
+                if(callOnAdd) {
+                    listener(element);
+                }
+            }
+
+            //Options object may be omitted.
+            if(!listener) {
+                listener = elements;
+                elements = options;
+                options = {};
+            }
+
+            if(!elements) {
+                throw new Error("At least one element required.");
+            }
+
+            if(!listener) {
+                throw new Error("Listener required.");
+            }
+
+            if (isElement(elements)) {
+                // A single element has been passed in.
+                elements = [elements];
+            } else if (isCollection(elements)) {
+                // Convert collection to array for plugins.
+                // TODO: May want to check so that all the elements in the collection are valid elements.
+                elements = toArray(elements);
+            } else {
+                return reporter$1.error("Invalid arguments. Must be a DOM element or a collection of DOM elements.");
+            }
+
+            var elementsReady = 0;
+
+            var callOnAdd = getOption(options, "callOnAdd", globalOptions.callOnAdd);
+            var onReadyCallback = getOption(options, "onReady", function noop() {});
+            var debug = getOption(options, "debug", globalOptions.debug);
+
+            forEach$1(elements, function attachListenerToElement(element) {
+                if (!stateHandler.getState(element)) {
+                    stateHandler.initState(element);
+                    idHandler$1.set(element);
+                }
+
+                var id = idHandler$1.get(element);
+
+                debug && reporter$1.log("Attaching listener to element", id, element);
+
+                if(!elementUtils$1.isDetectable(element)) {
+                    debug && reporter$1.log(id, "Not detectable.");
+                    if(elementUtils$1.isBusy(element)) {
+                        debug && reporter$1.log(id, "System busy making it detectable");
+
+                        //The element is being prepared to be detectable. Do not make it detectable.
+                        //Just add the listener, because the element will soon be detectable.
+                        addListener(callOnAdd, element, listener);
+                        onReadyCallbacks[id] = onReadyCallbacks[id] || [];
+                        onReadyCallbacks[id].push(function onReady() {
+                            elementsReady++;
+
+                            if(elementsReady === elements.length) {
+                                onReadyCallback();
+                            }
+                        });
+                        return;
+                    }
+
+                    debug && reporter$1.log(id, "Making detectable...");
+                    //The element is not prepared to be detectable, so do prepare it and add a listener to it.
+                    elementUtils$1.markBusy(element, true);
+                    return detectionStrategy.makeDetectable({ debug: debug, important: importantCssRules }, element, function onElementDetectable(element) {
+                        debug && reporter$1.log(id, "onElementDetectable");
+
+                        if (stateHandler.getState(element)) {
+                            elementUtils$1.markAsDetectable(element);
+                            elementUtils$1.markBusy(element, false);
+                            detectionStrategy.addListener(element, onResizeCallback);
+                            addListener(callOnAdd, element, listener);
+
+                            // Since the element size might have changed since the call to "listenTo", we need to check for this change,
+                            // so that a resize event may be emitted.
+                            // Having the startSize object is optional (since it does not make sense in some cases such as unrendered elements), so check for its existance before.
+                            // Also, check the state existance before since the element may have been uninstalled in the installation process.
+                            var state = stateHandler.getState(element);
+                            if (state && state.startSize) {
+                                var width = element.offsetWidth;
+                                var height = element.offsetHeight;
+                                if (state.startSize.width !== width || state.startSize.height !== height) {
+                                    onResizeCallback(element);
+                                }
+                            }
+
+                            if(onReadyCallbacks[id]) {
+                                forEach$1(onReadyCallbacks[id], function(callback) {
+                                    callback();
+                                });
+                            }
+                        } else {
+                            // The element has been unisntalled before being detectable.
+                            debug && reporter$1.log(id, "Element uninstalled before being detectable.");
+                        }
+
+                        delete onReadyCallbacks[id];
+
+                        elementsReady++;
+                        if(elementsReady === elements.length) {
+                            onReadyCallback();
+                        }
+                    });
+                }
+
+                debug && reporter$1.log(id, "Already detecable, adding listener.");
+
+                //The element has been prepared to be detectable and is ready to be listened to.
+                addListener(callOnAdd, element, listener);
+                elementsReady++;
+            });
+
+            if(elementsReady === elements.length) {
+                onReadyCallback();
+            }
+        }
+
+        function uninstall(elements) {
+            if(!elements) {
+                return reporter$1.error("At least one element is required.");
+            }
+
+            if (isElement(elements)) {
+                // A single element has been passed in.
+                elements = [elements];
+            } else if (isCollection(elements)) {
+                // Convert collection to array for plugins.
+                // TODO: May want to check so that all the elements in the collection are valid elements.
+                elements = toArray(elements);
+            } else {
+                return reporter$1.error("Invalid arguments. Must be a DOM element or a collection of DOM elements.");
+            }
+
+            forEach$1(elements, function (element) {
+                eventListenerHandler.removeAllListeners(element);
+                detectionStrategy.uninstall(element);
+                stateHandler.cleanState(element);
+            });
+        }
+
+        function initDocument(targetDocument) {
+            detectionStrategy.initDocument && detectionStrategy.initDocument(targetDocument);
+        }
+
+        return {
+            listenTo: listenTo,
+            removeListener: eventListenerHandler.removeListener,
+            removeAllListeners: eventListenerHandler.removeAllListeners,
+            uninstall: uninstall,
+            initDocument: initDocument
+        };
+    };
+
+    function getOption(options, name, defaultValue) {
+        var value = options[name];
+
+        if((value === undefined || value === null) && defaultValue !== undefined) {
+            return defaultValue;
+        }
+
+        return value;
+    }
+
+    var erd = elementResizeDetector({ strategy: "scroll" });
+    function watchResize(element, handler) {
+        erd.listenTo(element, handler);
+        var currentHandler = handler;
+        return {
+            update: function (newHandler) {
+                erd.removeListener(element, currentHandler);
+                erd.listenTo(element, newHandler);
+                currentHandler = newHandler;
+            },
+            destroy: function () {
+                erd.removeListener(element, currentHandler);
+            },
+        };
+    }
+
+    /* src\Portfolio-OLDVERSION.svelte generated by Svelte v3.25.0 */
+
+    const { Object: Object_1, console: console_1 } = globals;
+    const file$4 = "src\\Portfolio-OLDVERSION.svelte";
+
+    function create_fragment$4(ctx) {
+    	let div0;
+    	let t0;
+    	let div1;
+    	let h1;
+    	let t2;
+    	let span;
+    	let t3_value = /*works*/ ctx[4][/*selected*/ ctx[0]].description + "";
+    	let t3;
+    	let t4;
+    	let div11;
+    	let div2;
+    	let img0;
+    	let img0_src_value;
+    	let t5;
+    	let div9;
+    	let div5;
+    	let h3;
+    	let t6_value = /*works*/ ctx[4][/*selected*/ ctx[0]].title + "";
+    	let t6;
+    	let t7;
+    	let div3;
+    	let p0;
+    	let t8_value = /*works*/ ctx[4][/*selected*/ ctx[0]].description + "";
+    	let t8;
+    	let t9;
+    	let div4;
+    	let h5;
+    	let t11;
+    	let p1;
+    	let t12_value = /*works*/ ctx[4][/*selected*/ ctx[0]].technologies + "";
+    	let t12;
+    	let t13;
+    	let div8;
+    	let div6;
+    	let img1;
+    	let img1_src_value;
+    	let h40;
+    	let t15;
+    	let div7;
+    	let img2;
+    	let img2_src_value;
+    	let h41;
+    	let div7_class_value;
+    	let t17;
+    	let button;
+    	let div9_class_value;
+    	let t19;
+    	let img3;
+    	let img3_src_value;
+    	let t20;
+    	let div10;
+    	let img4;
+    	let img4_src_value;
+    	let mounted;
+    	let dispose;
+
+    	const block = {
+    		c: function create() {
+    			div0 = element("div");
+    			t0 = space();
+    			div1 = element("div");
+    			h1 = element("h1");
+    			h1.textContent = "X";
+    			t2 = space();
+    			span = element("span");
+    			t3 = text(t3_value);
+    			t4 = space();
+    			div11 = element("div");
+    			div2 = element("div");
+    			img0 = element("img");
+    			t5 = space();
+    			div9 = element("div");
+    			div5 = element("div");
+    			h3 = element("h3");
+    			t6 = text(t6_value);
+    			t7 = space();
+    			div3 = element("div");
+    			p0 = element("p");
+    			t8 = text(t8_value);
+    			t9 = space();
+    			div4 = element("div");
+    			h5 = element("h5");
+    			h5.textContent = "Technologies";
+    			t11 = space();
+    			p1 = element("p");
+    			t12 = text(t12_value);
+    			t13 = space();
+    			div8 = element("div");
+    			div6 = element("div");
+    			img1 = element("img");
+    			h40 = element("h4");
+    			h40.textContent = "Code";
+    			t15 = space();
+    			div7 = element("div");
+    			img2 = element("img");
+    			h41 = element("h4");
+    			h41.textContent = "Web Site";
+    			t17 = space();
+    			button = element("button");
+    			button.textContent = "Preview...";
+    			t19 = space();
+    			img3 = element("img");
+    			t20 = space();
+    			div10 = element("div");
+    			img4 = element("img");
+    			attr_dev(div0, "class", "over-background svelte-1x7ioni");
+    			add_location(div0, file$4, 160, 8, 6275);
+    			attr_dev(h1, "class", "svelte-1x7ioni");
+    			add_location(h1, file$4, 164, 12, 6432);
+    			add_location(span, file$4, 165, 12, 6484);
+    			attr_dev(div1, "class", "over animate svelte-1x7ioni");
+    			add_location(div1, file$4, 163, 8, 6372);
+    			if (img0.src !== (img0_src_value = "/images/play.png")) attr_dev(img0, "src", img0_src_value);
+    			attr_dev(img0, "alt", "previous");
+    			attr_dev(img0, "class", "prev-button svelte-1x7ioni");
+    			add_location(img0, file$4, 171, 28, 6723);
+    			attr_dev(div2, "class", "prev svelte-1x7ioni");
+    			add_location(div2, file$4, 170, 24, 6647);
+    			attr_dev(h3, "class", "fade svelte-1x7ioni");
+    			add_location(h3, file$4, 177, 36, 7106);
+    			add_location(p0, file$4, 180, 40, 7264);
+    			attr_dev(div3, "class", "first-description svelte-1x7ioni");
+    			add_location(div3, file$4, 179, 36, 7191);
+    			attr_dev(h5, "class", "svelte-1x7ioni");
+    			add_location(h5, file$4, 183, 40, 7456);
+    			attr_dev(p1, "class", "svelte-1x7ioni");
+    			add_location(p1, file$4, 184, 40, 7519);
+    			attr_dev(div4, "class", "first-technologies svelte-1x7ioni");
+    			add_location(div4, file$4, 182, 36, 7382);
+    			attr_dev(div5, "class", "first-body svelte-1x7ioni");
+    			add_location(div5, file$4, 176, 32, 7044);
+    			if (img1.src !== (img1_src_value = "/images/git-over.png")) attr_dev(img1, "src", img1_src_value);
+    			attr_dev(img1, "alt", "git");
+    			attr_dev(img1, "class", "svelte-1x7ioni");
+    			add_location(img1, file$4, 189, 111, 7846);
+    			add_location(h40, file$4, 189, 155, 7890);
+    			attr_dev(div6, "class", "git-over svelte-1x7ioni");
+    			add_location(div6, file$4, 189, 36, 7771);
+    			if (img2.src !== (img2_src_value = "/images/url-over.png")) attr_dev(img2, "src", img2_src_value);
+    			attr_dev(img2, "alt", "git");
+    			attr_dev(img2, "class", "svelte-1x7ioni");
+    			add_location(img2, file$4, 190, 148, 8059);
+    			add_location(h41, file$4, 190, 191, 8102);
+
+    			attr_dev(div7, "class", div7_class_value = "" + (null_to_empty(/*url*/ ctx[2]
+    			? "url-over visible"
+    			: "url-over invisible") + " svelte-1x7ioni"));
+
+    			add_location(div7, file$4, 190, 36, 7947);
+    			attr_dev(button, "class", "see-description svelte-1x7ioni");
+    			add_location(button, file$4, 191, 36, 8163);
+    			attr_dev(div8, "class", "first-menu fade svelte-1x7ioni");
+    			add_location(div8, file$4, 188, 32, 7704);
+    			attr_dev(div9, "class", div9_class_value = "" + (null_to_empty(/*animate*/ ctx[3] ? "first animationtesteo" : "first") + " svelte-1x7ioni"));
+    			add_location(div9, file$4, 174, 24, 6847);
+    			attr_dev(img3, "class", "swipe svelte-1x7ioni");
+    			attr_dev(img3, "alt", "handtouch");
+    			if (img3.src !== (img3_src_value = "/images/swipe.png")) attr_dev(img3, "src", img3_src_value);
+    			add_location(img3, file$4, 197, 24, 8421);
+    			if (img4.src !== (img4_src_value = "/images/play.png")) attr_dev(img4, "src", img4_src_value);
+    			attr_dev(img4, "alt", "previous");
+    			attr_dev(img4, "class", "next-button svelte-1x7ioni");
+    			add_location(img4, file$4, 200, 28, 8561);
+    			attr_dev(div10, "class", "next svelte-1x7ioni");
+    			add_location(div10, file$4, 199, 24, 8513);
+    			attr_dev(div11, "class", "carousel svelte-1x7ioni");
+    			add_location(div11, file$4, 168, 8, 6554);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div0, anchor);
+    			insert_dev(target, t0, anchor);
+    			insert_dev(target, div1, anchor);
+    			append_dev(div1, h1);
+    			append_dev(div1, t2);
+    			append_dev(div1, span);
+    			append_dev(span, t3);
+    			/*div1_binding*/ ctx[12](div1);
+    			insert_dev(target, t4, anchor);
+    			insert_dev(target, div11, anchor);
+    			append_dev(div11, div2);
+    			append_dev(div2, img0);
+    			append_dev(div11, t5);
+    			append_dev(div11, div9);
+    			append_dev(div9, div5);
+    			append_dev(div5, h3);
+    			append_dev(h3, t6);
+    			append_dev(div5, t7);
+    			append_dev(div5, div3);
+    			append_dev(div3, p0);
+    			append_dev(p0, t8);
+    			append_dev(div5, t9);
+    			append_dev(div5, div4);
+    			append_dev(div4, h5);
+    			append_dev(div4, t11);
+    			append_dev(div4, p1);
+    			append_dev(p1, t12);
+    			append_dev(div9, t13);
+    			append_dev(div9, div8);
+    			append_dev(div8, div6);
+    			append_dev(div6, img1);
+    			append_dev(div6, h40);
+    			append_dev(div8, t15);
+    			append_dev(div8, div7);
+    			append_dev(div7, img2);
+    			append_dev(div7, h41);
+    			append_dev(div8, t17);
+    			append_dev(div8, button);
+    			append_dev(div11, t19);
+    			append_dev(div11, img3);
+    			append_dev(div11, t20);
+    			append_dev(div11, div10);
+    			append_dev(div10, img4);
+
+    			if (!mounted) {
+    				dispose = [
+    					listen_dev(div0, "click", /*closeDescription*/ ctx[11], false, false, false),
+    					listen_dev(h1, "click", /*closeDescription*/ ctx[11], false, false, false),
+    					listen_dev(div2, "click", /*handleClickPrev*/ ctx[6], false, false, false),
+    					listen_dev(div6, "click", /*click_handler*/ ctx[13], false, false, false),
+    					listen_dev(div7, "click", /*click_handler_1*/ ctx[14], false, false, false),
+    					listen_dev(button, "click", /*seeDescription*/ ctx[10], false, false, false),
+    					listen_dev(div9, "touchstart", /*touchstart_handler*/ ctx[15], false, false, false),
+    					listen_dev(div9, "touchmove", /*touchmove_handler*/ ctx[16], false, false, false),
+    					listen_dev(img4, "click", /*handleClickNext*/ ctx[5], false, false, false),
+    					action_destroyer(watchResize.call(null, div11, /*resize*/ ctx[7]))
+    				];
+
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, [dirty]) {
+    			if (dirty & /*selected*/ 1 && t3_value !== (t3_value = /*works*/ ctx[4][/*selected*/ ctx[0]].description + "")) set_data_dev(t3, t3_value);
+    			if (dirty & /*selected*/ 1 && t6_value !== (t6_value = /*works*/ ctx[4][/*selected*/ ctx[0]].title + "")) set_data_dev(t6, t6_value);
+    			if (dirty & /*selected*/ 1 && t8_value !== (t8_value = /*works*/ ctx[4][/*selected*/ ctx[0]].description + "")) set_data_dev(t8, t8_value);
+    			if (dirty & /*selected*/ 1 && t12_value !== (t12_value = /*works*/ ctx[4][/*selected*/ ctx[0]].technologies + "")) set_data_dev(t12, t12_value);
+
+    			if (dirty & /*url*/ 4 && div7_class_value !== (div7_class_value = "" + (null_to_empty(/*url*/ ctx[2]
+    			? "url-over visible"
+    			: "url-over invisible") + " svelte-1x7ioni"))) {
+    				attr_dev(div7, "class", div7_class_value);
+    			}
+
+    			if (dirty & /*animate*/ 8 && div9_class_value !== (div9_class_value = "" + (null_to_empty(/*animate*/ ctx[3] ? "first animationtesteo" : "first") + " svelte-1x7ioni"))) {
+    				attr_dev(div9, "class", div9_class_value);
+    			}
+    		},
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div0);
+    			if (detaching) detach_dev(t0);
+    			if (detaching) detach_dev(div1);
+    			/*div1_binding*/ ctx[12](null);
+    			if (detaching) detach_dev(t4);
+    			if (detaching) detach_dev(div11);
+    			mounted = false;
+    			run_all(dispose);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$4.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$4($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots("Portfolio_OLDVERSION", slots, []);
+
+    	let works = {
+    		0: {
+    			"image": "/images/appogif.gif",
+    			"url": "",
+    			"giturl": "https://github.com/SergioPosse/Appointment-Patients-System---MERN",
+    			"title": "Medical-Care RioIV - Appointments System for administration",
+    			"technologies": "ReactJs (hooks), CSS , HTML, MongoDb Atlas",
+    			"description": "Web App for a small group of health proffesionals, destinated to schedule appointments in a practical way. Here i introduce React hooks to my toolbox and making the schedule calendar from scratch. The database is in the cloud Mongodb ATLAS"
+    		},
+    		1: {
+    			"image": "/images/siloh.gif",
+    			"url": "https://siloh-fumigacion.herokuapp.com/",
+    			"giturl": "https://github.com/SergioPosse/SilohFumigacion",
+    			"title": "Siloh Fumigacion",
+    			"technologies": "CSS - HTML - Mysql - MVC - Javascript - Heroku",
+    			"description": "This was one of my first exercices with javascript and PHP, for desktop browsers only!. Made from scratch mostly and exploring the MVC architecture. ATTENTION! Password for 'Administrador' is 'admin', for 'Empleado' is 'empleado'. Task manager for a small group of control plague professionals. Materialize and vanilla javascript with xmlhttprequest and PHP backend deployed to Heroku"
+    		}
+    	};
+
+    	let selected = 0;
+    	let overRef;
+    	let url = false;
+    	let animate = false;
+    	let reso;
+    	let animDuration;
+
+    	const handleClickNext = async () => {
+    		$$invalidate(3, animate = true); //first animation happend with current image and then when TIMEOUT change the selected work
+
+    		setTimeout(
+    			() => {
+    				$$invalidate(3, animate = false);
+    				let el = document.querySelector(".first-menu");
+    				el.classList.remove("fade");
+    				void el.offsetWidth; // trigger a DOM reflow //taken from stackoverflow
+    				el.classList.add("fade");
+
+    				for (let i = 0; i < Object.keys(works).length; i++) {
+    					if (works[selected] === works[i]) {
+    						if (works[selected + 1]) {
+    							$$invalidate(0, selected++, selected);
+    							console.log("sel: " + selected);
+    							break;
+    						} else {
+    							$$invalidate(0, selected = 0);
+    							break;
+    						}
+    					}
+    				}
+
+    				setCarousel();
+    			},
+    			animDuration
+    		); //this is the complete time for the multiple animation "testeo" and "testeo2" from the class .animationtesteo
+    	}; //wich is loaded dinamically with the boolear var "animate" in the html div tag   
+
+    	const handleClickPrev = async () => {
+    		$$invalidate(3, animate = true);
+
+    		setTimeout(
+    			() => {
+    				$$invalidate(3, animate = false);
+    				let el = document.querySelector(".first-menu");
+    				el.classList.remove("fade");
+    				void el.offsetWidth; // trigger a DOM reflow //taken from stackoverflow
+    				el.classList.add("fade");
+
+    				for (let i = 0; i < Object.keys(works).length; i++) {
+    					if (works[selected] === works[i]) {
+    						if (works[selected - 1]) {
+    							$$invalidate(0, selected--, selected);
+    							break;
+    						} else {
+    							$$invalidate(0, selected = Object.keys(works).length - 1);
+    							break;
+    						}
+    					}
+    				}
+
+    				setCarousel();
+    			},
+    			animDuration
+    		);
+    	};
+
+    	const setCarousel = () => {
+    		let current;
+    		current = works[selected];
+
+    		current.url != ""
+    		? $$invalidate(2, url = true)
+    		: $$invalidate(2, url = false);
+    	};
+
+    	onMount(() => {
+    		// First we get the viewport height and we multiple it by 1% to get a value for a vh unit
+    		let vh = window.innerHeight * 0.01;
+
+    		// Then we set the value in the --vh custom property to the root of the document
+    		document.documentElement.style.setProperty("--vh", `${vh}px`);
+
+    		reso = window.innerWidth;
+    		reso < 640 ? animDuration = 200 : animDuration = 1000;
+    		setCarousel();
+    	});
+
+    	const resize = () => {
+    		reso = window.innerWidth;
+    	};
+
+    	//mobile behaviour for touch instead mouse
+    	let xDown;
+
+    	const handleTouch = e => {
+    		console.dir(e);
+    		xDown = e.touches[0].clientX;
+    	};
+
+    	const handleTouchMove = e => {
+    		if (!xDown) {
+    			return;
+    		}
+
+    		let xUp = e.touches[0].clientX;
+    		let xDiff = xDown - xUp;
+
+    		if (xDiff > 0) {
+    			handleClickPrev();
+    		} else {
+    			handleClickNext();
+    		}
+
+    		/* reset values */
+    		xDown = null;
+    	};
+
+    	const seeDescription = () => {
+    		let el = overRef;
+    		el.style.setProperty("display", "flex");
+    		el.style.setProperty("opacity", "100%");
+    		document.querySelector(".over-background").style.setProperty("opacity", "80%");
+    		document.querySelector(".over-background").style.setProperty("z-index", "1000000");
+    		document.querySelector(".first").style.setProperty("opacity", "0%");
+    		document.querySelector(".next").style.setProperty("opacity", "0%");
+    		document.querySelector(".prev").style.setProperty("opacity", "0%");
+    		el.classList.remove("animate");
+    		void el.offsetWidth; // trigger a DOM reflow //taken from stackoverflow
+    		el.classList.add("animate");
+    	};
+
+    	const closeDescription = () => {
+    		let el = overRef;
+    		el.style.setProperty("display", "none");
+    		el.style.setProperty("opacity", "0%");
+    		document.querySelector(".over-background").style.setProperty("opacity", "0%");
+    		document.querySelector(".over-background").style.setProperty("z-index", "1000");
+    		document.querySelector(".first").style.setProperty("opacity", "100%");
+    		document.querySelector(".next").style.setProperty("opacity", "100%");
+    		document.querySelector(".prev").style.setProperty("opacity", "100%");
+    	};
+
+    	const writable_props = [];
+
+    	Object_1.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console_1.warn(`<Portfolio_OLDVERSION> was created with unknown prop '${key}'`);
+    	});
+
+    	function div1_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			overRef = $$value;
+    			$$invalidate(1, overRef);
+    		});
+    	}
+
+    	const click_handler = () => {
+    		window.open(works[selected].giturl);
+    	};
+
+    	const click_handler_1 = () => {
+    		window.open(works[selected].url);
+    	};
+
+    	const touchstart_handler = e => handleTouch(e);
+
+    	const touchmove_handler = e => {
+    		handleTouchMove(e);
+    	};
+
+    	$$self.$capture_state = () => ({
+    		onMount,
+    		watchResize,
+    		works,
+    		selected,
+    		overRef,
+    		url,
+    		animate,
+    		reso,
+    		animDuration,
+    		handleClickNext,
+    		handleClickPrev,
+    		setCarousel,
+    		resize,
+    		xDown,
+    		handleTouch,
+    		handleTouchMove,
+    		seeDescription,
+    		closeDescription
+    	});
+
+    	$$self.$inject_state = $$props => {
+    		if ("works" in $$props) $$invalidate(4, works = $$props.works);
+    		if ("selected" in $$props) $$invalidate(0, selected = $$props.selected);
+    		if ("overRef" in $$props) $$invalidate(1, overRef = $$props.overRef);
+    		if ("url" in $$props) $$invalidate(2, url = $$props.url);
+    		if ("animate" in $$props) $$invalidate(3, animate = $$props.animate);
+    		if ("reso" in $$props) reso = $$props.reso;
+    		if ("animDuration" in $$props) animDuration = $$props.animDuration;
+    		if ("xDown" in $$props) xDown = $$props.xDown;
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [
+    		selected,
+    		overRef,
+    		url,
+    		animate,
+    		works,
+    		handleClickNext,
+    		handleClickPrev,
+    		resize,
+    		handleTouch,
+    		handleTouchMove,
+    		seeDescription,
+    		closeDescription,
+    		div1_binding,
+    		click_handler,
+    		click_handler_1,
+    		touchstart_handler,
+    		touchmove_handler
+    	];
+    }
+
+    class Portfolio_OLDVERSION extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$4, create_fragment$4, safe_not_equal, {});
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Portfolio_OLDVERSION",
+    			options,
+    			id: create_fragment$4.name
+    		});
+    	}
+    }
+
+    var bind$1 = function bind(fn, thisArg) {
+      return function wrap() {
+        var args = new Array(arguments.length);
+        for (var i = 0; i < args.length; i++) {
+          args[i] = arguments[i];
+        }
+        return fn.apply(thisArg, args);
+      };
+    };
+
+    /*global toString:true*/
+
+    // utils is a library of generic helper functions non-specific to axios
+
+    var toString = Object.prototype.toString;
+
+    /**
+     * Determine if a value is an Array
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is an Array, otherwise false
+     */
+    function isArray(val) {
+      return toString.call(val) === '[object Array]';
+    }
+
+    /**
+     * Determine if a value is undefined
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if the value is undefined, otherwise false
+     */
+    function isUndefined(val) {
+      return typeof val === 'undefined';
+    }
+
+    /**
+     * Determine if a value is a Buffer
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a Buffer, otherwise false
+     */
+    function isBuffer(val) {
+      return val !== null && !isUndefined(val) && val.constructor !== null && !isUndefined(val.constructor)
+        && typeof val.constructor.isBuffer === 'function' && val.constructor.isBuffer(val);
+    }
+
+    /**
+     * Determine if a value is an ArrayBuffer
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is an ArrayBuffer, otherwise false
+     */
+    function isArrayBuffer(val) {
+      return toString.call(val) === '[object ArrayBuffer]';
+    }
+
+    /**
+     * Determine if a value is a FormData
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is an FormData, otherwise false
+     */
+    function isFormData(val) {
+      return (typeof FormData !== 'undefined') && (val instanceof FormData);
+    }
+
+    /**
+     * Determine if a value is a view on an ArrayBuffer
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a view on an ArrayBuffer, otherwise false
+     */
+    function isArrayBufferView(val) {
+      var result;
+      if ((typeof ArrayBuffer !== 'undefined') && (ArrayBuffer.isView)) {
+        result = ArrayBuffer.isView(val);
+      } else {
+        result = (val) && (val.buffer) && (val.buffer instanceof ArrayBuffer);
+      }
+      return result;
+    }
+
+    /**
+     * Determine if a value is a String
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a String, otherwise false
+     */
+    function isString(val) {
+      return typeof val === 'string';
+    }
+
+    /**
+     * Determine if a value is a Number
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a Number, otherwise false
+     */
+    function isNumber(val) {
+      return typeof val === 'number';
+    }
+
+    /**
+     * Determine if a value is an Object
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is an Object, otherwise false
+     */
+    function isObject(val) {
+      return val !== null && typeof val === 'object';
+    }
+
+    /**
+     * Determine if a value is a plain Object
+     *
+     * @param {Object} val The value to test
+     * @return {boolean} True if value is a plain Object, otherwise false
+     */
+    function isPlainObject(val) {
+      if (toString.call(val) !== '[object Object]') {
+        return false;
+      }
+
+      var prototype = Object.getPrototypeOf(val);
+      return prototype === null || prototype === Object.prototype;
+    }
+
+    /**
+     * Determine if a value is a Date
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a Date, otherwise false
+     */
+    function isDate(val) {
+      return toString.call(val) === '[object Date]';
+    }
+
+    /**
+     * Determine if a value is a File
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a File, otherwise false
+     */
+    function isFile(val) {
+      return toString.call(val) === '[object File]';
+    }
+
+    /**
+     * Determine if a value is a Blob
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a Blob, otherwise false
+     */
+    function isBlob(val) {
+      return toString.call(val) === '[object Blob]';
+    }
+
+    /**
+     * Determine if a value is a Function
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a Function, otherwise false
+     */
+    function isFunction(val) {
+      return toString.call(val) === '[object Function]';
+    }
+
+    /**
+     * Determine if a value is a Stream
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a Stream, otherwise false
+     */
+    function isStream(val) {
+      return isObject(val) && isFunction(val.pipe);
+    }
+
+    /**
+     * Determine if a value is a URLSearchParams object
+     *
+     * @param {Object} val The value to test
+     * @returns {boolean} True if value is a URLSearchParams object, otherwise false
+     */
+    function isURLSearchParams(val) {
+      return typeof URLSearchParams !== 'undefined' && val instanceof URLSearchParams;
+    }
+
+    /**
+     * Trim excess whitespace off the beginning and end of a string
+     *
+     * @param {String} str The String to trim
+     * @returns {String} The String freed of excess whitespace
+     */
+    function trim(str) {
+      return str.replace(/^\s*/, '').replace(/\s*$/, '');
+    }
+
+    /**
+     * Determine if we're running in a standard browser environment
+     *
+     * This allows axios to run in a web worker, and react-native.
+     * Both environments support XMLHttpRequest, but not fully standard globals.
+     *
+     * web workers:
+     *  typeof window -> undefined
+     *  typeof document -> undefined
+     *
+     * react-native:
+     *  navigator.product -> 'ReactNative'
+     * nativescript
+     *  navigator.product -> 'NativeScript' or 'NS'
+     */
+    function isStandardBrowserEnv() {
+      if (typeof navigator !== 'undefined' && (navigator.product === 'ReactNative' ||
+                                               navigator.product === 'NativeScript' ||
+                                               navigator.product === 'NS')) {
+        return false;
+      }
+      return (
+        typeof window !== 'undefined' &&
+        typeof document !== 'undefined'
+      );
+    }
+
+    /**
+     * Iterate over an Array or an Object invoking a function for each item.
+     *
+     * If `obj` is an Array callback will be called passing
+     * the value, index, and complete array for each item.
+     *
+     * If 'obj' is an Object callback will be called passing
+     * the value, key, and complete object for each property.
+     *
+     * @param {Object|Array} obj The object to iterate
+     * @param {Function} fn The callback to invoke for each item
+     */
+    function forEach$2(obj, fn) {
+      // Don't bother if no value provided
+      if (obj === null || typeof obj === 'undefined') {
+        return;
+      }
+
+      // Force an array if not already something iterable
+      if (typeof obj !== 'object') {
+        /*eslint no-param-reassign:0*/
+        obj = [obj];
+      }
+
+      if (isArray(obj)) {
+        // Iterate over array values
+        for (var i = 0, l = obj.length; i < l; i++) {
+          fn.call(null, obj[i], i, obj);
+        }
+      } else {
+        // Iterate over object keys
+        for (var key in obj) {
+          if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            fn.call(null, obj[key], key, obj);
+          }
+        }
+      }
+    }
+
+    /**
+     * Accepts varargs expecting each argument to be an object, then
+     * immutably merges the properties of each object and returns result.
+     *
+     * When multiple objects contain the same key the later object in
+     * the arguments list will take precedence.
+     *
+     * Example:
+     *
+     * ```js
+     * var result = merge({foo: 123}, {foo: 456});
+     * console.log(result.foo); // outputs 456
+     * ```
+     *
+     * @param {Object} obj1 Object to merge
+     * @returns {Object} Result of all merge properties
+     */
+    function merge(/* obj1, obj2, obj3, ... */) {
+      var result = {};
+      function assignValue(val, key) {
+        if (isPlainObject(result[key]) && isPlainObject(val)) {
+          result[key] = merge(result[key], val);
+        } else if (isPlainObject(val)) {
+          result[key] = merge({}, val);
+        } else if (isArray(val)) {
+          result[key] = val.slice();
+        } else {
+          result[key] = val;
+        }
+      }
+
+      for (var i = 0, l = arguments.length; i < l; i++) {
+        forEach$2(arguments[i], assignValue);
+      }
+      return result;
+    }
+
+    /**
+     * Extends object a by mutably adding to it the properties of object b.
+     *
+     * @param {Object} a The object to be extended
+     * @param {Object} b The object to copy properties from
+     * @param {Object} thisArg The object to bind function to
+     * @return {Object} The resulting value of object a
+     */
+    function extend(a, b, thisArg) {
+      forEach$2(b, function assignValue(val, key) {
+        if (thisArg && typeof val === 'function') {
+          a[key] = bind$1(val, thisArg);
+        } else {
+          a[key] = val;
+        }
+      });
+      return a;
+    }
+
+    /**
+     * Remove byte order marker. This catches EF BB BF (the UTF-8 BOM)
+     *
+     * @param {string} content with BOM
+     * @return {string} content value without BOM
+     */
+    function stripBOM(content) {
+      if (content.charCodeAt(0) === 0xFEFF) {
+        content = content.slice(1);
+      }
+      return content;
+    }
+
+    var utils = {
+      isArray: isArray,
+      isArrayBuffer: isArrayBuffer,
+      isBuffer: isBuffer,
+      isFormData: isFormData,
+      isArrayBufferView: isArrayBufferView,
+      isString: isString,
+      isNumber: isNumber,
+      isObject: isObject,
+      isPlainObject: isPlainObject,
+      isUndefined: isUndefined,
+      isDate: isDate,
+      isFile: isFile,
+      isBlob: isBlob,
+      isFunction: isFunction,
+      isStream: isStream,
+      isURLSearchParams: isURLSearchParams,
+      isStandardBrowserEnv: isStandardBrowserEnv,
+      forEach: forEach$2,
+      merge: merge,
+      extend: extend,
+      trim: trim,
+      stripBOM: stripBOM
+    };
+
+    function encode(val) {
+      return encodeURIComponent(val).
+        replace(/%3A/gi, ':').
+        replace(/%24/g, '$').
+        replace(/%2C/gi, ',').
+        replace(/%20/g, '+').
+        replace(/%5B/gi, '[').
+        replace(/%5D/gi, ']');
+    }
+
+    /**
+     * Build a URL by appending params to the end
+     *
+     * @param {string} url The base of the url (e.g., http://www.google.com)
+     * @param {object} [params] The params to be appended
+     * @returns {string} The formatted url
+     */
+    var buildURL = function buildURL(url, params, paramsSerializer) {
+      /*eslint no-param-reassign:0*/
+      if (!params) {
+        return url;
+      }
+
+      var serializedParams;
+      if (paramsSerializer) {
+        serializedParams = paramsSerializer(params);
+      } else if (utils.isURLSearchParams(params)) {
+        serializedParams = params.toString();
+      } else {
+        var parts = [];
+
+        utils.forEach(params, function serialize(val, key) {
+          if (val === null || typeof val === 'undefined') {
+            return;
+          }
+
+          if (utils.isArray(val)) {
+            key = key + '[]';
+          } else {
+            val = [val];
+          }
+
+          utils.forEach(val, function parseValue(v) {
+            if (utils.isDate(v)) {
+              v = v.toISOString();
+            } else if (utils.isObject(v)) {
+              v = JSON.stringify(v);
+            }
+            parts.push(encode(key) + '=' + encode(v));
+          });
+        });
+
+        serializedParams = parts.join('&');
+      }
+
+      if (serializedParams) {
+        var hashmarkIndex = url.indexOf('#');
+        if (hashmarkIndex !== -1) {
+          url = url.slice(0, hashmarkIndex);
+        }
+
+        url += (url.indexOf('?') === -1 ? '?' : '&') + serializedParams;
+      }
+
+      return url;
+    };
+
+    function InterceptorManager() {
+      this.handlers = [];
+    }
+
+    /**
+     * Add a new interceptor to the stack
+     *
+     * @param {Function} fulfilled The function to handle `then` for a `Promise`
+     * @param {Function} rejected The function to handle `reject` for a `Promise`
+     *
+     * @return {Number} An ID used to remove interceptor later
+     */
+    InterceptorManager.prototype.use = function use(fulfilled, rejected) {
+      this.handlers.push({
+        fulfilled: fulfilled,
+        rejected: rejected
+      });
+      return this.handlers.length - 1;
+    };
+
+    /**
+     * Remove an interceptor from the stack
+     *
+     * @param {Number} id The ID that was returned by `use`
+     */
+    InterceptorManager.prototype.eject = function eject(id) {
+      if (this.handlers[id]) {
+        this.handlers[id] = null;
+      }
+    };
+
+    /**
+     * Iterate over all the registered interceptors
+     *
+     * This method is particularly useful for skipping over any
+     * interceptors that may have become `null` calling `eject`.
+     *
+     * @param {Function} fn The function to call for each interceptor
+     */
+    InterceptorManager.prototype.forEach = function forEach(fn) {
+      utils.forEach(this.handlers, function forEachHandler(h) {
+        if (h !== null) {
+          fn(h);
+        }
+      });
+    };
+
+    var InterceptorManager_1 = InterceptorManager;
+
+    /**
+     * Transform the data for a request or a response
+     *
+     * @param {Object|String} data The data to be transformed
+     * @param {Array} headers The headers for the request or response
+     * @param {Array|Function} fns A single function or Array of functions
+     * @returns {*} The resulting transformed data
+     */
+    var transformData = function transformData(data, headers, fns) {
+      /*eslint no-param-reassign:0*/
+      utils.forEach(fns, function transform(fn) {
+        data = fn(data, headers);
+      });
+
+      return data;
+    };
+
+    var isCancel = function isCancel(value) {
+      return !!(value && value.__CANCEL__);
+    };
+
+    var normalizeHeaderName = function normalizeHeaderName(headers, normalizedName) {
+      utils.forEach(headers, function processHeader(value, name) {
+        if (name !== normalizedName && name.toUpperCase() === normalizedName.toUpperCase()) {
+          headers[normalizedName] = value;
+          delete headers[name];
+        }
+      });
+    };
+
+    /**
+     * Update an Error with the specified config, error code, and response.
+     *
+     * @param {Error} error The error to update.
+     * @param {Object} config The config.
+     * @param {string} [code] The error code (for example, 'ECONNABORTED').
+     * @param {Object} [request] The request.
+     * @param {Object} [response] The response.
+     * @returns {Error} The error.
+     */
+    var enhanceError = function enhanceError(error, config, code, request, response) {
+      error.config = config;
+      if (code) {
+        error.code = code;
+      }
+
+      error.request = request;
+      error.response = response;
+      error.isAxiosError = true;
+
+      error.toJSON = function toJSON() {
+        return {
+          // Standard
+          message: this.message,
+          name: this.name,
+          // Microsoft
+          description: this.description,
+          number: this.number,
+          // Mozilla
+          fileName: this.fileName,
+          lineNumber: this.lineNumber,
+          columnNumber: this.columnNumber,
+          stack: this.stack,
+          // Axios
+          config: this.config,
+          code: this.code
+        };
+      };
+      return error;
+    };
+
+    /**
+     * Create an Error with the specified message, config, error code, request and response.
+     *
+     * @param {string} message The error message.
+     * @param {Object} config The config.
+     * @param {string} [code] The error code (for example, 'ECONNABORTED').
+     * @param {Object} [request] The request.
+     * @param {Object} [response] The response.
+     * @returns {Error} The created error.
+     */
+    var createError = function createError(message, config, code, request, response) {
+      var error = new Error(message);
+      return enhanceError(error, config, code, request, response);
+    };
+
+    /**
+     * Resolve or reject a Promise based on response status.
+     *
+     * @param {Function} resolve A function that resolves the promise.
+     * @param {Function} reject A function that rejects the promise.
+     * @param {object} response The response.
+     */
+    var settle = function settle(resolve, reject, response) {
+      var validateStatus = response.config.validateStatus;
+      if (!response.status || !validateStatus || validateStatus(response.status)) {
+        resolve(response);
+      } else {
+        reject(createError(
+          'Request failed with status code ' + response.status,
+          response.config,
+          null,
+          response.request,
+          response
+        ));
+      }
+    };
+
+    var cookies = (
+      utils.isStandardBrowserEnv() ?
+
+      // Standard browser envs support document.cookie
+        (function standardBrowserEnv() {
+          return {
+            write: function write(name, value, expires, path, domain, secure) {
+              var cookie = [];
+              cookie.push(name + '=' + encodeURIComponent(value));
+
+              if (utils.isNumber(expires)) {
+                cookie.push('expires=' + new Date(expires).toGMTString());
+              }
+
+              if (utils.isString(path)) {
+                cookie.push('path=' + path);
+              }
+
+              if (utils.isString(domain)) {
+                cookie.push('domain=' + domain);
+              }
+
+              if (secure === true) {
+                cookie.push('secure');
+              }
+
+              document.cookie = cookie.join('; ');
+            },
+
+            read: function read(name) {
+              var match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+              return (match ? decodeURIComponent(match[3]) : null);
+            },
+
+            remove: function remove(name) {
+              this.write(name, '', Date.now() - 86400000);
+            }
+          };
+        })() :
+
+      // Non standard browser env (web workers, react-native) lack needed support.
+        (function nonStandardBrowserEnv() {
+          return {
+            write: function write() {},
+            read: function read() { return null; },
+            remove: function remove() {}
+          };
+        })()
+    );
+
+    /**
+     * Determines whether the specified URL is absolute
+     *
+     * @param {string} url The URL to test
+     * @returns {boolean} True if the specified URL is absolute, otherwise false
+     */
+    var isAbsoluteURL = function isAbsoluteURL(url) {
+      // A URL is considered absolute if it begins with "<scheme>://" or "//" (protocol-relative URL).
+      // RFC 3986 defines scheme name as a sequence of characters beginning with a letter and followed
+      // by any combination of letters, digits, plus, period, or hyphen.
+      return /^([a-z][a-z\d\+\-\.]*:)?\/\//i.test(url);
+    };
+
+    /**
+     * Creates a new URL by combining the specified URLs
+     *
+     * @param {string} baseURL The base URL
+     * @param {string} relativeURL The relative URL
+     * @returns {string} The combined URL
+     */
+    var combineURLs = function combineURLs(baseURL, relativeURL) {
+      return relativeURL
+        ? baseURL.replace(/\/+$/, '') + '/' + relativeURL.replace(/^\/+/, '')
+        : baseURL;
+    };
+
+    /**
+     * Creates a new URL by combining the baseURL with the requestedURL,
+     * only when the requestedURL is not already an absolute URL.
+     * If the requestURL is absolute, this function returns the requestedURL untouched.
+     *
+     * @param {string} baseURL The base URL
+     * @param {string} requestedURL Absolute or relative URL to combine
+     * @returns {string} The combined full path
+     */
+    var buildFullPath = function buildFullPath(baseURL, requestedURL) {
+      if (baseURL && !isAbsoluteURL(requestedURL)) {
+        return combineURLs(baseURL, requestedURL);
+      }
+      return requestedURL;
+    };
+
+    // Headers whose duplicates are ignored by node
+    // c.f. https://nodejs.org/api/http.html#http_message_headers
+    var ignoreDuplicateOf = [
+      'age', 'authorization', 'content-length', 'content-type', 'etag',
+      'expires', 'from', 'host', 'if-modified-since', 'if-unmodified-since',
+      'last-modified', 'location', 'max-forwards', 'proxy-authorization',
+      'referer', 'retry-after', 'user-agent'
+    ];
+
+    /**
+     * Parse headers into an object
+     *
+     * ```
+     * Date: Wed, 27 Aug 2014 08:58:49 GMT
+     * Content-Type: application/json
+     * Connection: keep-alive
+     * Transfer-Encoding: chunked
+     * ```
+     *
+     * @param {String} headers Headers needing to be parsed
+     * @returns {Object} Headers parsed into an object
+     */
+    var parseHeaders = function parseHeaders(headers) {
+      var parsed = {};
+      var key;
+      var val;
+      var i;
+
+      if (!headers) { return parsed; }
+
+      utils.forEach(headers.split('\n'), function parser(line) {
+        i = line.indexOf(':');
+        key = utils.trim(line.substr(0, i)).toLowerCase();
+        val = utils.trim(line.substr(i + 1));
+
+        if (key) {
+          if (parsed[key] && ignoreDuplicateOf.indexOf(key) >= 0) {
+            return;
+          }
+          if (key === 'set-cookie') {
+            parsed[key] = (parsed[key] ? parsed[key] : []).concat([val]);
+          } else {
+            parsed[key] = parsed[key] ? parsed[key] + ', ' + val : val;
+          }
+        }
+      });
+
+      return parsed;
+    };
+
+    var isURLSameOrigin = (
+      utils.isStandardBrowserEnv() ?
+
+      // Standard browser envs have full support of the APIs needed to test
+      // whether the request URL is of the same origin as current location.
+        (function standardBrowserEnv() {
+          var msie = /(msie|trident)/i.test(navigator.userAgent);
+          var urlParsingNode = document.createElement('a');
+          var originURL;
+
+          /**
+        * Parse a URL to discover it's components
+        *
+        * @param {String} url The URL to be parsed
+        * @returns {Object}
+        */
+          function resolveURL(url) {
+            var href = url;
+
+            if (msie) {
+            // IE needs attribute set twice to normalize properties
+              urlParsingNode.setAttribute('href', href);
+              href = urlParsingNode.href;
+            }
+
+            urlParsingNode.setAttribute('href', href);
+
+            // urlParsingNode provides the UrlUtils interface - http://url.spec.whatwg.org/#urlutils
+            return {
+              href: urlParsingNode.href,
+              protocol: urlParsingNode.protocol ? urlParsingNode.protocol.replace(/:$/, '') : '',
+              host: urlParsingNode.host,
+              search: urlParsingNode.search ? urlParsingNode.search.replace(/^\?/, '') : '',
+              hash: urlParsingNode.hash ? urlParsingNode.hash.replace(/^#/, '') : '',
+              hostname: urlParsingNode.hostname,
+              port: urlParsingNode.port,
+              pathname: (urlParsingNode.pathname.charAt(0) === '/') ?
+                urlParsingNode.pathname :
+                '/' + urlParsingNode.pathname
+            };
+          }
+
+          originURL = resolveURL(window.location.href);
+
+          /**
+        * Determine if a URL shares the same origin as the current location
+        *
+        * @param {String} requestURL The URL to test
+        * @returns {boolean} True if URL shares the same origin, otherwise false
+        */
+          return function isURLSameOrigin(requestURL) {
+            var parsed = (utils.isString(requestURL)) ? resolveURL(requestURL) : requestURL;
+            return (parsed.protocol === originURL.protocol &&
+                parsed.host === originURL.host);
+          };
+        })() :
+
+      // Non standard browser envs (web workers, react-native) lack needed support.
+        (function nonStandardBrowserEnv() {
+          return function isURLSameOrigin() {
+            return true;
+          };
+        })()
+    );
+
+    var xhr = function xhrAdapter(config) {
+      return new Promise(function dispatchXhrRequest(resolve, reject) {
+        var requestData = config.data;
+        var requestHeaders = config.headers;
+
+        if (utils.isFormData(requestData)) {
+          delete requestHeaders['Content-Type']; // Let the browser set it
+        }
+
+        var request = new XMLHttpRequest();
+
+        // HTTP basic authentication
+        if (config.auth) {
+          var username = config.auth.username || '';
+          var password = config.auth.password ? unescape(encodeURIComponent(config.auth.password)) : '';
+          requestHeaders.Authorization = 'Basic ' + btoa(username + ':' + password);
+        }
+
+        var fullPath = buildFullPath(config.baseURL, config.url);
+        request.open(config.method.toUpperCase(), buildURL(fullPath, config.params, config.paramsSerializer), true);
+
+        // Set the request timeout in MS
+        request.timeout = config.timeout;
+
+        // Listen for ready state
+        request.onreadystatechange = function handleLoad() {
+          if (!request || request.readyState !== 4) {
+            return;
+          }
+
+          // The request errored out and we didn't get a response, this will be
+          // handled by onerror instead
+          // With one exception: request that using file: protocol, most browsers
+          // will return status as 0 even though it's a successful request
+          if (request.status === 0 && !(request.responseURL && request.responseURL.indexOf('file:') === 0)) {
+            return;
+          }
+
+          // Prepare the response
+          var responseHeaders = 'getAllResponseHeaders' in request ? parseHeaders(request.getAllResponseHeaders()) : null;
+          var responseData = !config.responseType || config.responseType === 'text' ? request.responseText : request.response;
+          var response = {
+            data: responseData,
+            status: request.status,
+            statusText: request.statusText,
+            headers: responseHeaders,
+            config: config,
+            request: request
+          };
+
+          settle(resolve, reject, response);
+
+          // Clean up request
+          request = null;
+        };
+
+        // Handle browser request cancellation (as opposed to a manual cancellation)
+        request.onabort = function handleAbort() {
+          if (!request) {
+            return;
+          }
+
+          reject(createError('Request aborted', config, 'ECONNABORTED', request));
+
+          // Clean up request
+          request = null;
+        };
+
+        // Handle low level network errors
+        request.onerror = function handleError() {
+          // Real errors are hidden from us by the browser
+          // onerror should only fire if it's a network error
+          reject(createError('Network Error', config, null, request));
+
+          // Clean up request
+          request = null;
+        };
+
+        // Handle timeout
+        request.ontimeout = function handleTimeout() {
+          var timeoutErrorMessage = 'timeout of ' + config.timeout + 'ms exceeded';
+          if (config.timeoutErrorMessage) {
+            timeoutErrorMessage = config.timeoutErrorMessage;
+          }
+          reject(createError(timeoutErrorMessage, config, 'ECONNABORTED',
+            request));
+
+          // Clean up request
+          request = null;
+        };
+
+        // Add xsrf header
+        // This is only done if running in a standard browser environment.
+        // Specifically not if we're in a web worker, or react-native.
+        if (utils.isStandardBrowserEnv()) {
+          // Add xsrf header
+          var xsrfValue = (config.withCredentials || isURLSameOrigin(fullPath)) && config.xsrfCookieName ?
+            cookies.read(config.xsrfCookieName) :
+            undefined;
+
+          if (xsrfValue) {
+            requestHeaders[config.xsrfHeaderName] = xsrfValue;
+          }
+        }
+
+        // Add headers to the request
+        if ('setRequestHeader' in request) {
+          utils.forEach(requestHeaders, function setRequestHeader(val, key) {
+            if (typeof requestData === 'undefined' && key.toLowerCase() === 'content-type') {
+              // Remove Content-Type if data is undefined
+              delete requestHeaders[key];
+            } else {
+              // Otherwise add header to the request
+              request.setRequestHeader(key, val);
+            }
+          });
+        }
+
+        // Add withCredentials to request if needed
+        if (!utils.isUndefined(config.withCredentials)) {
+          request.withCredentials = !!config.withCredentials;
+        }
+
+        // Add responseType to request if needed
+        if (config.responseType) {
+          try {
+            request.responseType = config.responseType;
+          } catch (e) {
+            // Expected DOMException thrown by browsers not compatible XMLHttpRequest Level 2.
+            // But, this can be suppressed for 'json' type as it can be parsed by default 'transformResponse' function.
+            if (config.responseType !== 'json') {
+              throw e;
+            }
+          }
+        }
+
+        // Handle progress if needed
+        if (typeof config.onDownloadProgress === 'function') {
+          request.addEventListener('progress', config.onDownloadProgress);
+        }
+
+        // Not all browsers support upload events
+        if (typeof config.onUploadProgress === 'function' && request.upload) {
+          request.upload.addEventListener('progress', config.onUploadProgress);
+        }
+
+        if (config.cancelToken) {
+          // Handle cancellation
+          config.cancelToken.promise.then(function onCanceled(cancel) {
+            if (!request) {
+              return;
+            }
+
+            request.abort();
+            reject(cancel);
+            // Clean up request
+            request = null;
+          });
+        }
+
+        if (!requestData) {
+          requestData = null;
+        }
+
+        // Send the request
+        request.send(requestData);
+      });
+    };
+
+    var DEFAULT_CONTENT_TYPE = {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+
+    function setContentTypeIfUnset(headers, value) {
+      if (!utils.isUndefined(headers) && utils.isUndefined(headers['Content-Type'])) {
+        headers['Content-Type'] = value;
+      }
+    }
+
+    function getDefaultAdapter() {
+      var adapter;
+      if (typeof XMLHttpRequest !== 'undefined') {
+        // For browsers use XHR adapter
+        adapter = xhr;
+      } else if (typeof process !== 'undefined' && Object.prototype.toString.call(process) === '[object process]') {
+        // For node use HTTP adapter
+        adapter = xhr;
+      }
+      return adapter;
+    }
+
+    var defaults = {
+      adapter: getDefaultAdapter(),
+
+      transformRequest: [function transformRequest(data, headers) {
+        normalizeHeaderName(headers, 'Accept');
+        normalizeHeaderName(headers, 'Content-Type');
+        if (utils.isFormData(data) ||
+          utils.isArrayBuffer(data) ||
+          utils.isBuffer(data) ||
+          utils.isStream(data) ||
+          utils.isFile(data) ||
+          utils.isBlob(data)
+        ) {
+          return data;
+        }
+        if (utils.isArrayBufferView(data)) {
+          return data.buffer;
+        }
+        if (utils.isURLSearchParams(data)) {
+          setContentTypeIfUnset(headers, 'application/x-www-form-urlencoded;charset=utf-8');
+          return data.toString();
+        }
+        if (utils.isObject(data)) {
+          setContentTypeIfUnset(headers, 'application/json;charset=utf-8');
+          return JSON.stringify(data);
+        }
+        return data;
+      }],
+
+      transformResponse: [function transformResponse(data) {
+        /*eslint no-param-reassign:0*/
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (e) { /* Ignore */ }
+        }
+        return data;
+      }],
+
+      /**
+       * A timeout in milliseconds to abort a request. If set to 0 (default) a
+       * timeout is not created.
+       */
+      timeout: 0,
+
+      xsrfCookieName: 'XSRF-TOKEN',
+      xsrfHeaderName: 'X-XSRF-TOKEN',
+
+      maxContentLength: -1,
+      maxBodyLength: -1,
+
+      validateStatus: function validateStatus(status) {
+        return status >= 200 && status < 300;
+      }
+    };
+
+    defaults.headers = {
+      common: {
+        'Accept': 'application/json, text/plain, */*'
+      }
+    };
+
+    utils.forEach(['delete', 'get', 'head'], function forEachMethodNoData(method) {
+      defaults.headers[method] = {};
+    });
+
+    utils.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
+      defaults.headers[method] = utils.merge(DEFAULT_CONTENT_TYPE);
+    });
+
+    var defaults_1 = defaults;
+
+    /**
+     * Throws a `Cancel` if cancellation has been requested.
+     */
+    function throwIfCancellationRequested(config) {
+      if (config.cancelToken) {
+        config.cancelToken.throwIfRequested();
+      }
+    }
+
+    /**
+     * Dispatch a request to the server using the configured adapter.
+     *
+     * @param {object} config The config that is to be used for the request
+     * @returns {Promise} The Promise to be fulfilled
+     */
+    var dispatchRequest = function dispatchRequest(config) {
+      throwIfCancellationRequested(config);
+
+      // Ensure headers exist
+      config.headers = config.headers || {};
+
+      // Transform request data
+      config.data = transformData(
+        config.data,
+        config.headers,
+        config.transformRequest
+      );
+
+      // Flatten headers
+      config.headers = utils.merge(
+        config.headers.common || {},
+        config.headers[config.method] || {},
+        config.headers
+      );
+
+      utils.forEach(
+        ['delete', 'get', 'head', 'post', 'put', 'patch', 'common'],
+        function cleanHeaderConfig(method) {
+          delete config.headers[method];
+        }
+      );
+
+      var adapter = config.adapter || defaults_1.adapter;
+
+      return adapter(config).then(function onAdapterResolution(response) {
+        throwIfCancellationRequested(config);
+
+        // Transform response data
+        response.data = transformData(
+          response.data,
+          response.headers,
+          config.transformResponse
+        );
+
+        return response;
+      }, function onAdapterRejection(reason) {
+        if (!isCancel(reason)) {
+          throwIfCancellationRequested(config);
+
+          // Transform response data
+          if (reason && reason.response) {
+            reason.response.data = transformData(
+              reason.response.data,
+              reason.response.headers,
+              config.transformResponse
+            );
+          }
+        }
+
+        return Promise.reject(reason);
+      });
+    };
+
+    /**
+     * Config-specific merge-function which creates a new config-object
+     * by merging two configuration objects together.
+     *
+     * @param {Object} config1
+     * @param {Object} config2
+     * @returns {Object} New object resulting from merging config2 to config1
+     */
+    var mergeConfig = function mergeConfig(config1, config2) {
+      // eslint-disable-next-line no-param-reassign
+      config2 = config2 || {};
+      var config = {};
+
+      var valueFromConfig2Keys = ['url', 'method', 'data'];
+      var mergeDeepPropertiesKeys = ['headers', 'auth', 'proxy', 'params'];
+      var defaultToConfig2Keys = [
+        'baseURL', 'transformRequest', 'transformResponse', 'paramsSerializer',
+        'timeout', 'timeoutMessage', 'withCredentials', 'adapter', 'responseType', 'xsrfCookieName',
+        'xsrfHeaderName', 'onUploadProgress', 'onDownloadProgress', 'decompress',
+        'maxContentLength', 'maxBodyLength', 'maxRedirects', 'transport', 'httpAgent',
+        'httpsAgent', 'cancelToken', 'socketPath', 'responseEncoding'
+      ];
+      var directMergeKeys = ['validateStatus'];
+
+      function getMergedValue(target, source) {
+        if (utils.isPlainObject(target) && utils.isPlainObject(source)) {
+          return utils.merge(target, source);
+        } else if (utils.isPlainObject(source)) {
+          return utils.merge({}, source);
+        } else if (utils.isArray(source)) {
+          return source.slice();
+        }
+        return source;
+      }
+
+      function mergeDeepProperties(prop) {
+        if (!utils.isUndefined(config2[prop])) {
+          config[prop] = getMergedValue(config1[prop], config2[prop]);
+        } else if (!utils.isUndefined(config1[prop])) {
+          config[prop] = getMergedValue(undefined, config1[prop]);
+        }
+      }
+
+      utils.forEach(valueFromConfig2Keys, function valueFromConfig2(prop) {
+        if (!utils.isUndefined(config2[prop])) {
+          config[prop] = getMergedValue(undefined, config2[prop]);
+        }
+      });
+
+      utils.forEach(mergeDeepPropertiesKeys, mergeDeepProperties);
+
+      utils.forEach(defaultToConfig2Keys, function defaultToConfig2(prop) {
+        if (!utils.isUndefined(config2[prop])) {
+          config[prop] = getMergedValue(undefined, config2[prop]);
+        } else if (!utils.isUndefined(config1[prop])) {
+          config[prop] = getMergedValue(undefined, config1[prop]);
+        }
+      });
+
+      utils.forEach(directMergeKeys, function merge(prop) {
+        if (prop in config2) {
+          config[prop] = getMergedValue(config1[prop], config2[prop]);
+        } else if (prop in config1) {
+          config[prop] = getMergedValue(undefined, config1[prop]);
+        }
+      });
+
+      var axiosKeys = valueFromConfig2Keys
+        .concat(mergeDeepPropertiesKeys)
+        .concat(defaultToConfig2Keys)
+        .concat(directMergeKeys);
+
+      var otherKeys = Object
+        .keys(config1)
+        .concat(Object.keys(config2))
+        .filter(function filterAxiosKeys(key) {
+          return axiosKeys.indexOf(key) === -1;
+        });
+
+      utils.forEach(otherKeys, mergeDeepProperties);
+
+      return config;
+    };
+
+    /**
+     * Create a new instance of Axios
+     *
+     * @param {Object} instanceConfig The default config for the instance
+     */
+    function Axios(instanceConfig) {
+      this.defaults = instanceConfig;
+      this.interceptors = {
+        request: new InterceptorManager_1(),
+        response: new InterceptorManager_1()
+      };
+    }
+
+    /**
+     * Dispatch a request
+     *
+     * @param {Object} config The config specific for this request (merged with this.defaults)
+     */
+    Axios.prototype.request = function request(config) {
+      /*eslint no-param-reassign:0*/
+      // Allow for axios('example/url'[, config]) a la fetch API
+      if (typeof config === 'string') {
+        config = arguments[1] || {};
+        config.url = arguments[0];
+      } else {
+        config = config || {};
+      }
+
+      config = mergeConfig(this.defaults, config);
+
+      // Set config.method
+      if (config.method) {
+        config.method = config.method.toLowerCase();
+      } else if (this.defaults.method) {
+        config.method = this.defaults.method.toLowerCase();
+      } else {
+        config.method = 'get';
+      }
+
+      // Hook up interceptors middleware
+      var chain = [dispatchRequest, undefined];
+      var promise = Promise.resolve(config);
+
+      this.interceptors.request.forEach(function unshiftRequestInterceptors(interceptor) {
+        chain.unshift(interceptor.fulfilled, interceptor.rejected);
+      });
+
+      this.interceptors.response.forEach(function pushResponseInterceptors(interceptor) {
+        chain.push(interceptor.fulfilled, interceptor.rejected);
+      });
+
+      while (chain.length) {
+        promise = promise.then(chain.shift(), chain.shift());
+      }
+
+      return promise;
+    };
+
+    Axios.prototype.getUri = function getUri(config) {
+      config = mergeConfig(this.defaults, config);
+      return buildURL(config.url, config.params, config.paramsSerializer).replace(/^\?/, '');
+    };
+
+    // Provide aliases for supported request methods
+    utils.forEach(['delete', 'get', 'head', 'options'], function forEachMethodNoData(method) {
+      /*eslint func-names:0*/
+      Axios.prototype[method] = function(url, config) {
+        return this.request(mergeConfig(config || {}, {
+          method: method,
+          url: url,
+          data: (config || {}).data
+        }));
+      };
+    });
+
+    utils.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
+      /*eslint func-names:0*/
+      Axios.prototype[method] = function(url, data, config) {
+        return this.request(mergeConfig(config || {}, {
+          method: method,
+          url: url,
+          data: data
+        }));
+      };
+    });
+
+    var Axios_1 = Axios;
+
+    /**
+     * A `Cancel` is an object that is thrown when an operation is canceled.
+     *
+     * @class
+     * @param {string=} message The message.
+     */
+    function Cancel(message) {
+      this.message = message;
+    }
+
+    Cancel.prototype.toString = function toString() {
+      return 'Cancel' + (this.message ? ': ' + this.message : '');
+    };
+
+    Cancel.prototype.__CANCEL__ = true;
+
+    var Cancel_1 = Cancel;
+
+    /**
+     * A `CancelToken` is an object that can be used to request cancellation of an operation.
+     *
+     * @class
+     * @param {Function} executor The executor function.
+     */
+    function CancelToken(executor) {
+      if (typeof executor !== 'function') {
+        throw new TypeError('executor must be a function.');
+      }
+
+      var resolvePromise;
+      this.promise = new Promise(function promiseExecutor(resolve) {
+        resolvePromise = resolve;
+      });
+
+      var token = this;
+      executor(function cancel(message) {
+        if (token.reason) {
+          // Cancellation has already been requested
+          return;
+        }
+
+        token.reason = new Cancel_1(message);
+        resolvePromise(token.reason);
+      });
+    }
+
+    /**
+     * Throws a `Cancel` if cancellation has been requested.
+     */
+    CancelToken.prototype.throwIfRequested = function throwIfRequested() {
+      if (this.reason) {
+        throw this.reason;
+      }
+    };
+
+    /**
+     * Returns an object that contains a new `CancelToken` and a function that, when called,
+     * cancels the `CancelToken`.
+     */
+    CancelToken.source = function source() {
+      var cancel;
+      var token = new CancelToken(function executor(c) {
+        cancel = c;
+      });
+      return {
+        token: token,
+        cancel: cancel
+      };
+    };
+
+    var CancelToken_1 = CancelToken;
+
+    /**
+     * Syntactic sugar for invoking a function and expanding an array for arguments.
+     *
+     * Common use case would be to use `Function.prototype.apply`.
+     *
+     *  ```js
+     *  function f(x, y, z) {}
+     *  var args = [1, 2, 3];
+     *  f.apply(null, args);
+     *  ```
+     *
+     * With `spread` this example can be re-written.
+     *
+     *  ```js
+     *  spread(function(x, y, z) {})([1, 2, 3]);
+     *  ```
+     *
+     * @param {Function} callback
+     * @returns {Function}
+     */
+    var spread = function spread(callback) {
+      return function wrap(arr) {
+        return callback.apply(null, arr);
+      };
+    };
+
+    /**
+     * Determines whether the payload is an error thrown by Axios
+     *
+     * @param {*} payload The value to test
+     * @returns {boolean} True if the payload is an error thrown by Axios, otherwise false
+     */
+    var isAxiosError = function isAxiosError(payload) {
+      return (typeof payload === 'object') && (payload.isAxiosError === true);
+    };
+
+    /**
+     * Create an instance of Axios
+     *
+     * @param {Object} defaultConfig The default config for the instance
+     * @return {Axios} A new instance of Axios
+     */
+    function createInstance(defaultConfig) {
+      var context = new Axios_1(defaultConfig);
+      var instance = bind$1(Axios_1.prototype.request, context);
+
+      // Copy axios.prototype to instance
+      utils.extend(instance, Axios_1.prototype, context);
+
+      // Copy context to instance
+      utils.extend(instance, context);
+
+      return instance;
+    }
+
+    // Create the default instance to be exported
+    var axios = createInstance(defaults_1);
+
+    // Expose Axios class to allow class inheritance
+    axios.Axios = Axios_1;
+
+    // Factory for creating new instances
+    axios.create = function create(instanceConfig) {
+      return createInstance(mergeConfig(axios.defaults, instanceConfig));
+    };
+
+    // Expose Cancel & CancelToken
+    axios.Cancel = Cancel_1;
+    axios.CancelToken = CancelToken_1;
+    axios.isCancel = isCancel;
+
+    // Expose all/spread
+    axios.all = function all(promises) {
+      return Promise.all(promises);
+    };
+    axios.spread = spread;
+
+    // Expose isAxiosError
+    axios.isAxiosError = isAxiosError;
+
+    var axios_1 = axios;
+
+    // Allow use of default import syntax in TypeScript
+    var _default = axios;
+    axios_1.default = _default;
+
+    var axios$1 = axios_1;
+
+    /* src\App.svelte generated by Svelte v3.25.0 */
+
+    const { console: console_1$1 } = globals;
+    const file$5 = "src\\App.svelte";
+
+    // (172:0) {#if (!hideMenu)}
+    function create_if_block_3(ctx) {
+    	let div;
+    	let h4;
+    	let t1;
+    	let h6;
+    	let t3;
+    	let h5;
+    	let t5;
+    	let t6;
+    	let button;
+    	let current;
+    	let mounted;
+    	let dispose;
+    	let if_block = /*reso*/ ctx[0] < 640 && create_if_block_4(ctx);
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			h4 = element("h4");
+    			h4.textContent = "Sergio David Posse";
+    			t1 = space();
+    			h6 = element("h6");
+    			h6.textContent = "Software Developer";
+    			t3 = space();
+    			h5 = element("h5");
+    			h5.textContent = "Sergiodavidposse@gmail.com";
+    			t5 = space();
+    			if (if_block) if_block.c();
+    			t6 = space();
+    			button = element("button");
+    			button.textContent = "Quick message";
+    			attr_dev(h4, "class", "menu-modal-item svelte-v7o1zx");
+    			set_style(h4, "color", "white");
+    			set_style(h4, "background-color", "black");
+    			add_location(h4, file$5, 173, 1, 5470);
+    			attr_dev(h6, "class", "menu-modal-item");
+    			set_style(h6, "margin-top", "-10%");
+    			set_style(h6, "color", "white");
+    			set_style(h6, "background-color", "weat");
+    			add_location(h6, file$5, 174, 1, 5566);
+    			attr_dev(h5, "class", "email svelte-v7o1zx");
+    			set_style(h5, "color", "white");
+    			set_style(h5, "cursor", "text", 1);
+    			set_style(h5, "padding", "3%");
+    			add_location(h5, file$5, 175, 1, 5678);
+    			attr_dev(button, "class", "quick-button svelte-v7o1zx");
+    			add_location(button, file$5, 181, 4, 5850);
+    			attr_dev(div, "class", "menu-modal svelte-v7o1zx");
+    			add_location(div, file$5, 172, 0, 5422);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			append_dev(div, h4);
+    			append_dev(div, t1);
+    			append_dev(div, h6);
+    			append_dev(div, t3);
+    			append_dev(div, h5);
+    			append_dev(div, t5);
+    			if (if_block) if_block.m(div, null);
+    			append_dev(div, t6);
+    			append_dev(div, button);
+    			/*div_binding*/ ctx[22](div);
+    			current = true;
+
+    			if (!mounted) {
+    				dispose = listen_dev(button, "click", /*handleButton*/ ctx[15], false, false, false);
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, dirty) {
+    			if (/*reso*/ ctx[0] < 640) {
+    				if (if_block) {
+    					if (dirty[0] & /*reso*/ 1) {
+    						transition_in(if_block, 1);
+    					}
+    				} else {
+    					if_block = create_if_block_4(ctx);
+    					if_block.c();
+    					transition_in(if_block, 1);
+    					if_block.m(div, t6);
+    				}
+    			} else if (if_block) {
+    				group_outros();
+
+    				transition_out(if_block, 1, 1, () => {
+    					if_block = null;
+    				});
+
+    				check_outros();
+    			}
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(if_block);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(if_block);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			if (if_block) if_block.d();
+    			/*div_binding*/ ctx[22](null);
+    			mounted = false;
+    			dispose();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_3.name,
+    		type: "if",
+    		source: "(172:0) {#if (!hideMenu)}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (177:1) {#if reso<640}
+    function create_if_block_4(ctx) {
+    	let span;
+    	let social;
+    	let current;
+    	social = new Social({ $$inline: true });
+
+    	const block = {
+    		c: function create() {
+    			span = element("span");
+    			create_component(social.$$.fragment);
+    			attr_dev(span, "class", "svelte-v7o1zx");
+    			add_location(span, file$5, 177, 2, 5801);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, span, anchor);
+    			mount_component(social, span, null);
+    			current = true;
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(social.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(social.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(span);
+    			destroy_component(social);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_4.name,
+    		type: "if",
+    		source: "(177:1) {#if reso<640}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (191:1) {#if reso> 640}
+    function create_if_block_2(ctx) {
+    	let social;
+    	let updating_canvasSocialSide;
+    	let updating_socialSide;
+    	let current;
+
+    	function social_canvasSocialSide_binding(value) {
+    		/*social_canvasSocialSide_binding*/ ctx[25].call(null, value);
+    	}
+
+    	function social_socialSide_binding(value) {
+    		/*social_socialSide_binding*/ ctx[26].call(null, value);
+    	}
+
+    	let social_props = {};
+
+    	if (/*canvasSocialSide*/ ctx[10] !== void 0) {
+    		social_props.canvasSocialSide = /*canvasSocialSide*/ ctx[10];
+    	}
+
+    	if (/*socialSide*/ ctx[9] !== void 0) {
+    		social_props.socialSide = /*socialSide*/ ctx[9];
+    	}
+
+    	social = new Social({ props: social_props, $$inline: true });
+    	binding_callbacks.push(() => bind(social, "canvasSocialSide", social_canvasSocialSide_binding));
+    	binding_callbacks.push(() => bind(social, "socialSide", social_socialSide_binding));
+
+    	const block = {
+    		c: function create() {
+    			create_component(social.$$.fragment);
+    		},
+    		m: function mount(target, anchor) {
+    			mount_component(social, target, anchor);
+    			current = true;
+    		},
+    		p: function update(ctx, dirty) {
+    			const social_changes = {};
+
+    			if (!updating_canvasSocialSide && dirty[0] & /*canvasSocialSide*/ 1024) {
+    				updating_canvasSocialSide = true;
+    				social_changes.canvasSocialSide = /*canvasSocialSide*/ ctx[10];
+    				add_flush_callback(() => updating_canvasSocialSide = false);
+    			}
+
+    			if (!updating_socialSide && dirty[0] & /*socialSide*/ 512) {
+    				updating_socialSide = true;
+    				social_changes.socialSide = /*socialSide*/ ctx[9];
+    				add_flush_callback(() => updating_socialSide = false);
+    			}
+
+    			social.$set(social_changes);
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(social.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(social.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			destroy_component(social, detaching);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_2.name,
+    		type: "if",
+    		source: "(191:1) {#if reso> 640}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (195:1) {#if (showAbout)}
+    function create_if_block_1(ctx) {
+    	let about;
+    	let updating_skillsEl;
+    	let updating_whoEl;
+    	let current;
+
+    	function about_skillsEl_binding(value) {
+    		/*about_skillsEl_binding*/ ctx[27].call(null, value);
+    	}
+
+    	function about_whoEl_binding(value) {
+    		/*about_whoEl_binding*/ ctx[28].call(null, value);
+    	}
+
+    	let about_props = {};
+
+    	if (/*skillsEl*/ ctx[11] !== void 0) {
+    		about_props.skillsEl = /*skillsEl*/ ctx[11];
+    	}
+
+    	if (/*whoEl*/ ctx[12] !== void 0) {
+    		about_props.whoEl = /*whoEl*/ ctx[12];
+    	}
+
+    	about = new About({ props: about_props, $$inline: true });
+    	binding_callbacks.push(() => bind(about, "skillsEl", about_skillsEl_binding));
+    	binding_callbacks.push(() => bind(about, "whoEl", about_whoEl_binding));
+
+    	const block = {
+    		c: function create() {
+    			create_component(about.$$.fragment);
+    		},
+    		m: function mount(target, anchor) {
+    			mount_component(about, target, anchor);
+    			current = true;
+    		},
+    		p: function update(ctx, dirty) {
+    			const about_changes = {};
+
+    			if (!updating_skillsEl && dirty[0] & /*skillsEl*/ 2048) {
+    				updating_skillsEl = true;
+    				about_changes.skillsEl = /*skillsEl*/ ctx[11];
+    				add_flush_callback(() => updating_skillsEl = false);
+    			}
+
+    			if (!updating_whoEl && dirty[0] & /*whoEl*/ 4096) {
+    				updating_whoEl = true;
+    				about_changes.whoEl = /*whoEl*/ ctx[12];
+    				add_flush_callback(() => updating_whoEl = false);
+    			}
+
+    			about.$set(about_changes);
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(about.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(about.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			destroy_component(about, detaching);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_1.name,
+    		type: "if",
+    		source: "(195:1) {#if (showAbout)}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (199:1) {#if (!showAbout)}
+    function create_if_block(ctx) {
+    	let portfolio;
+    	let current;
+    	portfolio = new Portfolio_OLDVERSION({ $$inline: true });
+
+    	const block = {
+    		c: function create() {
+    			create_component(portfolio.$$.fragment);
+    		},
+    		m: function mount(target, anchor) {
+    			mount_component(portfolio, target, anchor);
+    			current = true;
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(portfolio.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(portfolio.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			destroy_component(portfolio, detaching);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block.name,
+    		type: "if",
+    		source: "(199:1) {#if (!showAbout)}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function create_fragment$5(ctx) {
+    	let div0;
+    	let t0;
+    	let div6;
+    	let h1;
+    	let t2;
+    	let div4;
+    	let div1;
+    	let h50;
+    	let t4;
+    	let input;
+    	let t5;
+    	let div2;
+    	let h51;
+    	let t7;
+    	let textarea;
+    	let t8;
+    	let div3;
+    	let button0;
+    	let t10;
+    	let button1;
+    	let t12;
+    	let div5;
+    	let h2;
+    	let t14;
+    	let h3;
+    	let t16;
+    	let t17;
+    	let main;
+    	let img;
+    	let img_src_value;
+    	let t18;
+    	let nav;
+    	let updating_showAbout;
+    	let updating_showPortfolio;
+    	let t19;
+    	let t20;
+    	let t21;
+    	let t22;
+    	let footer;
+    	let current;
+    	let mounted;
+    	let dispose;
+    	let if_block0 = !/*hideMenu*/ ctx[1] && create_if_block_3(ctx);
+
+    	function nav_showAbout_binding(value) {
+    		/*nav_showAbout_binding*/ ctx[23].call(null, value);
+    	}
+
+    	function nav_showPortfolio_binding(value) {
+    		/*nav_showPortfolio_binding*/ ctx[24].call(null, value);
+    	}
+
+    	let nav_props = {};
+
+    	if (/*showAbout*/ ctx[7] !== void 0) {
+    		nav_props.showAbout = /*showAbout*/ ctx[7];
+    	}
+
+    	if (/*showPortfolio*/ ctx[8] !== void 0) {
+    		nav_props.showPortfolio = /*showPortfolio*/ ctx[8];
+    	}
+
+    	nav = new Nav({ props: nav_props, $$inline: true });
+    	binding_callbacks.push(() => bind(nav, "showAbout", nav_showAbout_binding));
+    	binding_callbacks.push(() => bind(nav, "showPortfolio", nav_showPortfolio_binding));
+    	let if_block1 = /*reso*/ ctx[0] > 640 && create_if_block_2(ctx);
+    	let if_block2 = /*showAbout*/ ctx[7] && create_if_block_1(ctx);
+    	let if_block3 = !/*showAbout*/ ctx[7] && create_if_block(ctx);
+    	footer = new Footer({ $$inline: true });
+
+    	const block = {
+    		c: function create() {
+    			div0 = element("div");
+    			t0 = space();
+    			div6 = element("div");
+    			h1 = element("h1");
+    			h1.textContent = "X";
+    			t2 = space();
+    			div4 = element("div");
+    			div1 = element("div");
+    			h50 = element("h5");
+    			h50.textContent = "Your name/email";
+    			t4 = space();
+    			input = element("input");
+    			t5 = space();
+    			div2 = element("div");
+    			h51 = element("h5");
+    			h51.textContent = "Your Message";
+    			t7 = space();
+    			textarea = element("textarea");
+    			t8 = space();
+    			div3 = element("div");
+    			button0 = element("button");
+    			button0.textContent = "ENVIAR";
+    			t10 = space();
+    			button1 = element("button");
+    			button1.textContent = "LIMPIAR";
+    			t12 = space();
+    			div5 = element("div");
+    			h2 = element("h2");
+    			h2.textContent = "Ponete en contacto de la forma mas facil!";
+    			t14 = space();
+    			h3 = element("h3");
+    			h3.textContent = "Esperamos tu consulta...";
+    			t16 = space();
+    			if (if_block0) if_block0.c();
+    			t17 = space();
+    			main = element("main");
+    			img = element("img");
+    			t18 = space();
+    			create_component(nav.$$.fragment);
+    			t19 = space();
+    			if (if_block1) if_block1.c();
+    			t20 = space();
+    			if (if_block2) if_block2.c();
+    			t21 = space();
+    			if (if_block3) if_block3.c();
+    			t22 = space();
+    			create_component(footer.$$.fragment);
+    			attr_dev(div0, "class", "message-background svelte-v7o1zx");
+    			add_location(div0, file$5, 139, 0, 3784);
+    			set_style(h1, "cursor", "pointer");
+    			set_style(h1, "position", "absolute");
+    			set_style(h1, "right", "0");
+    			set_style(h1, "top", "-15%");
+    			attr_dev(h1, "class", "svelte-v7o1zx");
+    			add_location(h1, file$5, 143, 2, 3919);
+    			set_style(h50, "padding", "0");
+    			set_style(h50, "margin", "0");
+    			add_location(h50, file$5, 148, 4, 4356);
+    			attr_dev(input, "id", "email");
+    			attr_dev(input, "placeholder", "type here...");
+    			set_style(input, "text-align", "center");
+    			set_style(input, "width", "90%");
+    			set_style(input, "height", "auto");
+    			attr_dev(input, "class", "svelte-v7o1zx");
+    			add_location(input, file$5, 149, 4, 4413);
+    			attr_dev(div1, "class", "your-name svelte-v7o1zx");
+    			set_style(div1, "width", "80%");
+    			set_style(div1, "height", "30%");
+    			set_style(div1, "display", "flex");
+    			set_style(div1, "flex-direction", "column");
+    			set_style(div1, "justify-content", "center");
+    			set_style(div1, "justify-items", "center");
+    			set_style(div1, "align-items", "center");
+    			set_style(div1, "align-content", "center");
+    			add_location(div1, file$5, 147, 3, 4180);
+    			set_style(h51, "padding", "0");
+    			set_style(h51, "margin", "0");
+    			add_location(h51, file$5, 153, 4, 4655);
+    			attr_dev(textarea, "id", "mensaje");
+    			set_style(textarea, "height", "70%");
+    			set_style(textarea, "width", "90%");
+    			attr_dev(textarea, "class", "svelte-v7o1zx");
+    			add_location(textarea, file$5, 154, 4, 4709);
+    			attr_dev(div2, "class", "your-message svelte-v7o1zx");
+    			set_style(div2, "width", "80%");
+    			set_style(div2, "height", "60%");
+    			set_style(div2, "display", "flex");
+    			set_style(div2, "flex-direction", "column");
+    			set_style(div2, "align-items", "center");
+    			add_location(div2, file$5, 152, 3, 4540);
+    			attr_dev(button0, "target", "_blank");
+    			attr_dev(button0, "id", "sendemail");
+    			set_style(button0, "color", "rgb(0, 0, 0)");
+    			set_style(button0, "background-color", "chartreuse");
+    			attr_dev(button0, "class", "svelte-v7o1zx");
+    			add_location(button0, file$5, 158, 4, 4953);
+    			attr_dev(button1, "id", "clean");
+    			set_style(button1, "color", "white");
+    			set_style(button1, "background-color", "rgba(216, 0, 0, 0.568)");
+    			attr_dev(button1, "class", "svelte-v7o1zx");
+    			add_location(button1, file$5, 159, 4, 5090);
+    			attr_dev(div3, "class", "buttons svelte-v7o1zx");
+    			set_style(div3, "width", "80%");
+    			set_style(div3, "height", "auto");
+    			set_style(div3, "width", "30%");
+    			set_style(div3, "display", "flex");
+    			set_style(div3, "flex-direction", "row");
+    			set_style(div3, "justify-content", "space-evenly", 1);
+    			add_location(div3, file$5, 157, 3, 4810);
+    			set_style(div4, "height", "100%");
+    			set_style(div4, "width", "75%");
+    			set_style(div4, "display", "flex");
+    			set_style(div4, "flex-direction", "column");
+    			set_style(div4, "justify-content", "center");
+    			set_style(div4, "justify-items", "center");
+    			set_style(div4, "align-items", "center");
+    			set_style(div4, "align-content", "center");
+    			add_location(div4, file$5, 145, 2, 4020);
+    			add_location(h2, file$5, 165, 3, 5294);
+    			add_location(h3, file$5, 166, 3, 5348);
+    			attr_dev(div5, "class", "contact-phrase svelte-v7o1zx");
+    			set_style(div5, "font-size", "1.7vw");
+    			add_location(div5, file$5, 164, 2, 5238);
+    			attr_dev(div6, "class", "message animateMessage svelte-v7o1zx");
+    			add_location(div6, file$5, 142, 0, 3855);
+    			if (img.src !== (img_src_value = "/images/menu.png")) attr_dev(img, "src", img_src_value);
+    			attr_dev(img, "alt", "menu");
+    			attr_dev(img, "class", "svelte-v7o1zx");
+    			add_location(img, file$5, 187, 1, 5995);
+    			attr_dev(main, "class", "svelte-v7o1zx");
+    			add_location(main, file$5, 185, 0, 5940);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div0, anchor);
+    			insert_dev(target, t0, anchor);
+    			insert_dev(target, div6, anchor);
+    			append_dev(div6, h1);
+    			append_dev(div6, t2);
+    			append_dev(div6, div4);
+    			append_dev(div4, div1);
+    			append_dev(div1, h50);
+    			append_dev(div1, t4);
+    			append_dev(div1, input);
+    			/*input_binding*/ ctx[19](input);
+    			append_dev(div4, t5);
+    			append_dev(div4, div2);
+    			append_dev(div2, h51);
+    			append_dev(div2, t7);
+    			append_dev(div2, textarea);
+    			/*textarea_binding*/ ctx[20](textarea);
+    			append_dev(div4, t8);
+    			append_dev(div4, div3);
+    			append_dev(div3, button0);
+    			append_dev(div3, t10);
+    			append_dev(div3, button1);
+    			append_dev(div6, t12);
+    			append_dev(div6, div5);
+    			append_dev(div5, h2);
+    			append_dev(div5, t14);
+    			append_dev(div5, h3);
+    			/*div6_binding*/ ctx[21](div6);
+    			insert_dev(target, t16, anchor);
+    			if (if_block0) if_block0.m(target, anchor);
+    			insert_dev(target, t17, anchor);
+    			insert_dev(target, main, anchor);
+    			append_dev(main, img);
+    			append_dev(main, t18);
+    			mount_component(nav, main, null);
+    			append_dev(main, t19);
+    			if (if_block1) if_block1.m(main, null);
+    			append_dev(main, t20);
+    			if (if_block2) if_block2.m(main, null);
+    			append_dev(main, t21);
+    			if (if_block3) if_block3.m(main, null);
+    			append_dev(main, t22);
+    			mount_component(footer, main, null);
+    			/*main_binding*/ ctx[29](main);
+    			current = true;
+
+    			if (!mounted) {
+    				dispose = [
+    					listen_dev(div0, "click", /*closeModalMessage*/ ctx[16], false, false, false),
+    					listen_dev(h1, "click", /*closeModalMessage*/ ctx[16], false, false, false),
+    					listen_dev(button0, "click", /*sendemail*/ ctx[17], false, false, false),
+    					listen_dev(button1, "click", /*cleanButton*/ ctx[18], false, false, false),
+    					listen_dev(img, "click", /*clickMenu*/ ctx[14], false, false, false),
+    					action_destroyer(watchResize.call(null, main, /*resize*/ ctx[13]))
+    				];
+
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, dirty) {
+    			if (!/*hideMenu*/ ctx[1]) {
+    				if (if_block0) {
+    					if_block0.p(ctx, dirty);
+
+    					if (dirty[0] & /*hideMenu*/ 2) {
+    						transition_in(if_block0, 1);
+    					}
+    				} else {
+    					if_block0 = create_if_block_3(ctx);
+    					if_block0.c();
+    					transition_in(if_block0, 1);
+    					if_block0.m(t17.parentNode, t17);
+    				}
+    			} else if (if_block0) {
+    				group_outros();
+
+    				transition_out(if_block0, 1, 1, () => {
+    					if_block0 = null;
+    				});
+
+    				check_outros();
+    			}
+
+    			const nav_changes = {};
+
+    			if (!updating_showAbout && dirty[0] & /*showAbout*/ 128) {
+    				updating_showAbout = true;
+    				nav_changes.showAbout = /*showAbout*/ ctx[7];
+    				add_flush_callback(() => updating_showAbout = false);
+    			}
+
+    			if (!updating_showPortfolio && dirty[0] & /*showPortfolio*/ 256) {
+    				updating_showPortfolio = true;
+    				nav_changes.showPortfolio = /*showPortfolio*/ ctx[8];
+    				add_flush_callback(() => updating_showPortfolio = false);
+    			}
+
+    			nav.$set(nav_changes);
+
+    			if (/*reso*/ ctx[0] > 640) {
+    				if (if_block1) {
+    					if_block1.p(ctx, dirty);
+
+    					if (dirty[0] & /*reso*/ 1) {
+    						transition_in(if_block1, 1);
+    					}
+    				} else {
+    					if_block1 = create_if_block_2(ctx);
+    					if_block1.c();
+    					transition_in(if_block1, 1);
+    					if_block1.m(main, t20);
+    				}
+    			} else if (if_block1) {
+    				group_outros();
+
+    				transition_out(if_block1, 1, 1, () => {
+    					if_block1 = null;
+    				});
+
+    				check_outros();
+    			}
+
+    			if (/*showAbout*/ ctx[7]) {
+    				if (if_block2) {
+    					if_block2.p(ctx, dirty);
+
+    					if (dirty[0] & /*showAbout*/ 128) {
+    						transition_in(if_block2, 1);
+    					}
+    				} else {
+    					if_block2 = create_if_block_1(ctx);
+    					if_block2.c();
+    					transition_in(if_block2, 1);
+    					if_block2.m(main, t21);
+    				}
+    			} else if (if_block2) {
+    				group_outros();
+
+    				transition_out(if_block2, 1, 1, () => {
+    					if_block2 = null;
+    				});
+
+    				check_outros();
+    			}
+
+    			if (!/*showAbout*/ ctx[7]) {
+    				if (if_block3) {
+    					if (dirty[0] & /*showAbout*/ 128) {
+    						transition_in(if_block3, 1);
+    					}
+    				} else {
+    					if_block3 = create_if_block(ctx);
+    					if_block3.c();
+    					transition_in(if_block3, 1);
+    					if_block3.m(main, t22);
+    				}
+    			} else if (if_block3) {
+    				group_outros();
+
+    				transition_out(if_block3, 1, 1, () => {
+    					if_block3 = null;
+    				});
+
+    				check_outros();
+    			}
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(if_block0);
+    			transition_in(nav.$$.fragment, local);
+    			transition_in(if_block1);
+    			transition_in(if_block2);
+    			transition_in(if_block3);
+    			transition_in(footer.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(if_block0);
+    			transition_out(nav.$$.fragment, local);
+    			transition_out(if_block1);
+    			transition_out(if_block2);
+    			transition_out(if_block3);
+    			transition_out(footer.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div0);
+    			if (detaching) detach_dev(t0);
+    			if (detaching) detach_dev(div6);
+    			/*input_binding*/ ctx[19](null);
+    			/*textarea_binding*/ ctx[20](null);
+    			/*div6_binding*/ ctx[21](null);
+    			if (detaching) detach_dev(t16);
+    			if (if_block0) if_block0.d(detaching);
+    			if (detaching) detach_dev(t17);
+    			if (detaching) detach_dev(main);
+    			destroy_component(nav);
+    			if (if_block1) if_block1.d();
+    			if (if_block2) if_block2.d();
+    			if (if_block3) if_block3.d();
+    			destroy_component(footer);
+    			/*main_binding*/ ctx[29](null);
+    			mounted = false;
+    			run_all(dispose);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$5.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$5($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots("App", slots, []);
+    	let reso;
+    	let hideMenu = true;
+    	let modalMenu;
+    	let mainRef;
+    	let modalMessage;
+    	let message;
+    	let email;
+
+    	//this var set to setContext for studie propousal
+    	//imports from childs (in childs same name but "export" specification)
+    	let showAbout = true;
+
+    	let showPortfolio;
+    	let socialSide;
+    	let canvasSocialSide;
+    	let skillsEl;
+    	let whoEl;
+
+    	onMount(async () => {
+    		const { data } = await axios$1.get("http://localhost:4000/api");
+    		console.log(data.emojis);
+    		let vh = window.innerHeight * 0.01;
+    		document.documentElement.style.setProperty("--vh", `${vh}px`);
+
+    		mainRef.addEventListener("change", () => {
+    			
+    		});
+
+    		$$invalidate(0, reso = window.innerWidth);
+    		window.addEventListener("mousemove", handleMouseOutside);
+
+    		// console.dir(modalMenu);
+    		if (reso < 640) {
+    			mainRef.style.setProperty("height", "auto");
+    		}
+
+    		$$invalidate(1, hideMenu = true); //for example this modified the hideMenu var original from the child exports it		
+    	});
+
+    	const resize = () => {
+    		$$invalidate(0, reso = window.innerWidth);
+
+    		if (reso < 640) {
+    			mainRef.style.setProperty("height", "auto !important");
+    		}
+    	};
+
+    	//watch the mouse move for detect if is out or inside the element we pass it
+    	const matchElementEvent = (element, event) => {
+    		let x = parseInt(event.clientX);
+    		let y = parseInt(event.clientY);
+
+    		// console.log("mouse x: "+x," mouse y: "+y);
+    		let top = parseInt(element.offsetTop);
+
+    		let bot = parseInt(element.offsetTop + element.offsetHeight);
+    		let left = parseInt(element.offsetLeft);
+    		let right = parseInt(element.offsetLeft + element.offsetWidth);
+
+    		// console.log("bot: "+bot+" top: "+top);
+    		// console.log("left: "+left+" right: "+right);
+    		if (y > bot || x > right || y < top || x < left) {
+    			// console.log("hide element...");
+    			// console.log(true);
+    			// document.removeEventListener("mousedown", handleClickOutside);
+    			return true;
+    		} else {
+    			// console.log("dont hide element...");
+    			// document.removeEventListener("mousedown", handleClickOutside);
+    			return false;
+    		}
+    	};
+
+    	//with helps from the function "matchElementEvent"
+    	//i setup here whats elements will be watching
+    	const handleMouseOutside = async event => {
+    		if (hideMenu === false) {
+    			if (matchElementEvent(modalMenu, event)) {
+    				$$invalidate(1, hideMenu = true);
+    			} else {
+    				$$invalidate(1, hideMenu = false);
+    			}
+
+    			 //is necesary?
+    		}
+
+    		if (matchElementEvent(canvasSocialSide, event)) {
+    			socialSide.classList.remove("social-over");
+    		} else {
+    			socialSide.classList.add("social-over");
+    		}
+    	};
+
+    	const clickMenu = () => {
+    		console.log("cliii");
+    		$$invalidate(1, hideMenu = false);
+    	};
+
+    	const handleButton = () => {
+    		let el = modalMessage;
+    		el.style.setProperty("display", "flex");
+    		el.style.setProperty("opacity", "100%");
+    		document.querySelector(".message-background").style.setProperty("opacity", "80%");
+    		document.querySelector(".message-background").style.setProperty("z-index", "1000000");
+    		el.classList.remove("animateMessage");
+    		void el.offsetWidth; // trigger a DOM reflow //taken from stackoverflow
+    		el.classList.add("animateMessage");
+    		$$invalidate(1, hideMenu = true);
+    	};
+
+    	const closeModalMessage = () => {
+    		let el = modalMessage;
+    		el.style.setProperty("display", "none");
+    		el.style.setProperty("opacity", "0%");
+    		document.querySelector(".message-background").style.setProperty("opacity", "0%");
+    		document.querySelector(".message-background").style.setProperty("z-index", "1");
+    	};
+
+    	const sendemail = () => {
+    		
+    	};
+
+    	const cleanButton = () => {
+    		$$invalidate(6, email.value = "", email);
+    		$$invalidate(5, message.value = "", message);
+    	};
+
+    	const writable_props = [];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== "$$") console_1$1.warn(`<App> was created with unknown prop '${key}'`);
+    	});
+
+    	function input_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			email = $$value;
+    			$$invalidate(6, email);
+    		});
+    	}
+
+    	function textarea_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			message = $$value;
+    			$$invalidate(5, message);
+    		});
+    	}
+
+    	function div6_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			modalMessage = $$value;
+    			$$invalidate(4, modalMessage);
+    		});
+    	}
+
+    	function div_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			modalMenu = $$value;
+    			$$invalidate(2, modalMenu);
+    		});
+    	}
+
+    	function nav_showAbout_binding(value) {
+    		showAbout = value;
+    		$$invalidate(7, showAbout);
+    	}
+
+    	function nav_showPortfolio_binding(value) {
+    		showPortfolio = value;
+    		$$invalidate(8, showPortfolio);
+    	}
+
+    	function social_canvasSocialSide_binding(value) {
+    		canvasSocialSide = value;
+    		$$invalidate(10, canvasSocialSide);
+    	}
+
+    	function social_socialSide_binding(value) {
+    		socialSide = value;
+    		$$invalidate(9, socialSide);
+    	}
+
+    	function about_skillsEl_binding(value) {
+    		skillsEl = value;
+    		$$invalidate(11, skillsEl);
+    	}
+
+    	function about_whoEl_binding(value) {
+    		whoEl = value;
+    		$$invalidate(12, whoEl);
+    	}
+
+    	function main_binding($$value) {
+    		binding_callbacks[$$value ? "unshift" : "push"](() => {
+    			mainRef = $$value;
+    			$$invalidate(3, mainRef);
+    		});
+    	}
+
+    	$$self.$capture_state = () => ({
+    		About,
+    		Nav,
+    		Footer,
+    		Social,
+    		Portfolio: Portfolio_OLDVERSION,
+    		onMount,
+    		watchResize,
+    		axios: axios$1,
+    		reso,
+    		hideMenu,
+    		modalMenu,
+    		mainRef,
+    		modalMessage,
+    		message,
+    		email,
+    		showAbout,
+    		showPortfolio,
+    		socialSide,
+    		canvasSocialSide,
+    		skillsEl,
+    		whoEl,
+    		resize,
+    		matchElementEvent,
+    		handleMouseOutside,
+    		clickMenu,
+    		handleButton,
+    		closeModalMessage,
+    		sendemail,
+    		cleanButton
+    	});
+
+    	$$self.$inject_state = $$props => {
+    		if ("reso" in $$props) $$invalidate(0, reso = $$props.reso);
+    		if ("hideMenu" in $$props) $$invalidate(1, hideMenu = $$props.hideMenu);
+    		if ("modalMenu" in $$props) $$invalidate(2, modalMenu = $$props.modalMenu);
+    		if ("mainRef" in $$props) $$invalidate(3, mainRef = $$props.mainRef);
+    		if ("modalMessage" in $$props) $$invalidate(4, modalMessage = $$props.modalMessage);
+    		if ("message" in $$props) $$invalidate(5, message = $$props.message);
+    		if ("email" in $$props) $$invalidate(6, email = $$props.email);
+    		if ("showAbout" in $$props) $$invalidate(7, showAbout = $$props.showAbout);
+    		if ("showPortfolio" in $$props) $$invalidate(8, showPortfolio = $$props.showPortfolio);
+    		if ("socialSide" in $$props) $$invalidate(9, socialSide = $$props.socialSide);
+    		if ("canvasSocialSide" in $$props) $$invalidate(10, canvasSocialSide = $$props.canvasSocialSide);
+    		if ("skillsEl" in $$props) $$invalidate(11, skillsEl = $$props.skillsEl);
+    		if ("whoEl" in $$props) $$invalidate(12, whoEl = $$props.whoEl);
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [
+    		reso,
+    		hideMenu,
+    		modalMenu,
+    		mainRef,
+    		modalMessage,
+    		message,
+    		email,
+    		showAbout,
+    		showPortfolio,
+    		socialSide,
+    		canvasSocialSide,
+    		skillsEl,
+    		whoEl,
+    		resize,
+    		clickMenu,
+    		handleButton,
+    		closeModalMessage,
+    		sendemail,
+    		cleanButton,
+    		input_binding,
+    		textarea_binding,
+    		div6_binding,
+    		div_binding,
+    		nav_showAbout_binding,
+    		nav_showPortfolio_binding,
+    		social_canvasSocialSide_binding,
+    		social_socialSide_binding,
+    		about_skillsEl_binding,
+    		about_whoEl_binding,
+    		main_binding
+    	];
+    }
+
+    class App extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$5, create_fragment$5, safe_not_equal, {}, [-1, -1]);
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "App",
+    			options,
+    			id: create_fragment$5.name
+    		});
+    	}
+    }
+
+    const app = new App({
+    	target: document.body,
+    	props: {
+    	}
+    });
+
+    return app;
+
+}());
+//# sourceMappingURL=bundle.js.map
