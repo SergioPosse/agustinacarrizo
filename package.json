@@ -6,10 +6,7 @@
   },
   "scripts": {
     "build": "rollup -c",
-    "autobuild": "rollup -c -w",
-    "dev": "run-p start:dev autobuild",
-    "start": "sirv public --single",
-    "start:dev": "sirv public --single --dev"
+    "start": "sirv public --single --port $PORT"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^14.0.0",
@@ -28,6 +25,7 @@
   },
   "dependencies": {
     "axios": "^0.21.1",
+    "dotenv": "^8.2.0",
     "sirv-cli": "^1.0.0"
   }
 }
