@@ -7,10 +7,10 @@ import { watchResize } from "svelte-watch-resize";
     let works = {
         0:{
             "image": "/images/appogif.gif",
-            "url": "",
+            "url": "https://medical-care-rioiv.herokuapp.com/",
             "giturl": "https://github.com/SergioPosse/Appointment-Patients-System---MERN",
-            "title": "Medical-Care RioIV - Appointments System for administration",
-            "technologies": "ReactJs (hooks), CSS , HTML, MongoDb Atlas",
+            "title": "Medical-Care RioIV",
+            "technologies": "ReactJs (hooks), CSS , HTML, MongoDb Atlas, Custom API, NodeJs, Heroku",
             "description": "Web App for a small group of health proffesionals, destinated to schedule appointments in a practical way. Here i introduce React hooks to my toolbox and making the schedule calendar from scratch. The database is in the cloud Mongodb ATLAS"
         },
         1:{
@@ -20,9 +20,48 @@ import { watchResize } from "svelte-watch-resize";
             "title": "Siloh Fumigacion",
             "technologies": "CSS - HTML - Mysql - MVC - Javascript - Heroku",
             "description": "This was one of my first exercices with javascript and PHP, for desktop browsers only!. Made from scratch mostly and exploring the MVC architecture. ATTENTION! Password for 'Administrador' is 'admin', for 'Empleado' is 'empleado'. Task manager for a small group of control plague professionals. Materialize and vanilla javascript with xmlhttprequest and PHP backend deployed to Heroku"
-        } 
+        },
+        2:{
+            "image": "",
+            "url": "http://posselistascolas.surge.sh/",
+            "giturl": "https://github.com/SergioPosse/queueListsJS",
+            "title": "Lists and Queue Javascript",
+            "technologies": "Data structure - Javascript - HTML/CSS",
+            "description": "Project created for my understanding about how lists and queues work with javascript.Plus bubble sort made from scratch. Deployment in Surge."
+        },
+        3:{
+            "image": "",
+            "url": "https://private-practice.herokuapp.com/",
+            "giturl": "https://github.com/SergioPosse/privatePractice",
+            "title": "Private Practice SPA",
+            "technologies": "Vanilla Javascript - HTML/CSS - Php with PhpMailer",
+            "description": "Single Page App for a small group of proffesionals from my city. I made the scroll animations from scratch with vanilla Javascript"
+        },
+        4:{
+            "image": "",
+            "url": "https://sergioposse.surge.sh/",
+            "giturl": "https://github.com/SergioPosse/sergiopossedev",
+            "title": "My Landing Page",
+            "technologies": "Svelte - Javascript/HTML/CSS - Nodejs (nodemailer service)",
+            "description": "My landing page, exploring the Svelte framework, some css/javascript animation from scratch and Nodemailer in the backend. Front deployed to Surge and backend to Heroku"
+        },
+        5:{
+            "image":"",
+            "url": "https://posseInversePolishCalc.surge.sh/",
+            "giturl": "https://github.com/SergioPosse/InversePolishCalc",
+            "title": "Inverse Polish Calc in vanilla Javascript",
+            "technologies": "Javascript/Html/Css - Materialize - Jquery",
+            "description": "A calculator made with a stack in javascript as data structure"
+        },
+        6:{
+            "image":"",
+            "url": "https://agustinacarrizofotografia.herokuapp.com/",
+            "giturl": "https://github.com/SergioPosse/agustinacarrizofotografia",
+            "title": "Simple photo/video store",
+            "technologies": "ReactJs - Paypal Integration - NodeJs",
+            "description": "Photo/video store for photographer Agustina Carrizo. Paypal API was implemented"
+        }
     }
-
     let selected=0;
     let overRef;
     let url = false;
@@ -223,6 +262,8 @@ import { watchResize } from "svelte-watch-resize";
     padding:3%;
     font-size:100%;
     align-content:center;
+    justify-content:center;
+    justify-items:center;
     
 }
 .first-technologies{
@@ -284,6 +325,7 @@ import { watchResize } from "svelte-watch-resize";
     border:none;
     color:var(--l-purple);
     text-decoration: underline;
+    cursor:pointer;
 }
 .over-background{
     position:absolute;

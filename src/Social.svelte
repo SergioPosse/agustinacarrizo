@@ -34,6 +34,7 @@
         justify-content: space-evenly;
         transition:1s;
         border-radius:5%;
+        z-index:100000000;
     }
     social img{
         cursor:pointer;

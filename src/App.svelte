@@ -6,7 +6,7 @@
 	import Portfolio from './Portfolio-OLDVERSION.svelte';
 	import { onMount } from 'svelte';
 	import { watchResize } from "svelte-watch-resize";
-	// import axios from 'axios';
+	import axios from 'axios';
 
 
 
@@ -30,8 +30,8 @@
 
 	onMount(async()=>{
 
-		// const { data } = await axios.get('http://localhost:4000/api');
-    	// console.log(data.emojis);
+		const { data } = await axios.get('https://sposse.herokuapp.com/');
+    	console.log(data.emojis);
 
 		let vh = window.innerHeight * 0.01;
 		document.documentElement.style.setProperty('--vh', `${vh}px`);
@@ -128,9 +128,15 @@
         document.querySelector('.message-background').style.setProperty("z-index","1");
 	}
 	
-	const sendemail = ()=>{
-		alert("mail");
-
+	const sendemail = async()=>{
+		const result = await axios.post('https://sposse.herokuapp.com/sendemail', {
+		from: email,
+		message: message
+		});
+		console.log(result);
+		if(result){
+			alert("Message sended")
+		}
 	}
 	const cleanButton = ()=>{
 		email.value = "";
@@ -157,8 +163,8 @@
 			</div>
 		
 			<div class="buttons" style="width:80%;height:auto;width:30%;display:flex;flex-direction:row;justify-content:space-evenly !important;" >   
-				<button target="_blank" id="sendemail" on:click={sendemail} style="color:rgb(0, 0, 0);background-color: chartreuse;">ENVIAR</button>
-				<button on:click={cleanButton} id="clean" style="color:white;background-color: rgba(216, 0, 0, 0.568);">LIMPIAR</button>
+				<button target="_blank" id="sendemail" on:click={sendemail} style="cursor:pointer;color:rgb(0, 0, 0);background-color: chartreuse;">ENVIAR</button>
+				<button on:click={cleanButton} id="clean" style="cursor:pointer;color:white;background-color: rgba(216, 0, 0, 0.568);">LIMPIAR</button>
 			</div>
 				
 		</div>

@@ -5,7 +5,7 @@ import livereload from 'rollup-plugin-livereload';
 import { terser } from 'rollup-plugin-terser';
 import svg from 'rollup-plugin-svelte-svg';
 import json from '@rollup/plugin-json';
-// import copy from 'rollup-plugin-copy-watch'
+import copy from 'rollup-plugin-copy-watch'
 
 const production = !process.env.ROLLUP_WATCH;
 
@@ -42,14 +42,14 @@ export default {
 		// whatsapp: '/images/whatsapp.svg'
 	},
 	plugins: [
-		// copy({
-		// 	watch: 'static',   
-		// 	targets: [
-		// 	  { src: 'src/index.html', dest: 'dist/public' },
-		// 	  { src: ['assets/fonts/arial.woff', 'assets/fonts/arial.woff2'], dest: 'dist/public/fonts' },
-		// 	  { src: 'assets/images/**/*', dest: 'dist/public/images' }
-		// 	]
-		//   }),
+		copy({
+			watch: 'static',   
+			targets: [
+			  { src: 'src/index.html', dest: 'dist/public' },
+			  { src: ['assets/fonts/arial.woff', 'assets/fonts/arial.woff2'], dest: 'dist/public/fonts' },
+			  { src: 'assets/images/**/*', dest: 'dist/public/images' }
+			]
+		  }),
 		svelte({
 			// enable run-time checks when not in production
 			dev: !production,
