@@ -7,6 +7,7 @@
 	import { onMount } from 'svelte';
 	import { watchResize } from "svelte-watch-resize";
 	import axios from 'axios';
+	import { fade } from 'svelte/transition';
 
 
 
@@ -18,6 +19,8 @@
 	let modalMessage;
 	let message;
 	let email;
+	let emailSuccess;
+	let visible=false;
 	//this var set to setContext for studie propousal
 
 	//imports from childs (in childs same name but "export" specification)
@@ -129,23 +132,109 @@
 	}
 	
 	const sendemail = async()=>{
-		const result = await axios.post('https://sposse.herokuapp.com/sendemail', {
-		from: email,
-		message: message
-		});
-		console.log(result);
-		if(result){
-			alert("Message sended")
-		}
+			emailSuccess.style.setProperty('display','none');
+			modalMessage.style.setProperty('display','none');
+			modalMessage.style.setProperty('opacity','0%');
+			visible=true;
+			const runAxios = ()=>{
+				const onprogress = ()=>{
+				visible=true;
+			}
+
+			axios.post('https://sposse.herokuapp.com/sendemail', {
+				'from': email.value,
+				'message': message.value
+			},{
+				onUploadProgress: onprogress,
+				headers:{
+				Accept: 'application/json',
+			'Content-Type': 'application/json'
+			}
+			})
+			.then(function (response) {
+				console.log(response);
+				visible=false;
+				email.value = "";
+				message.value = "";
+				// alert("sended "+response);
+				emailSuccess.style.setProperty('display','flex');
+			})
+			.catch(function (error) {
+				visible=false;
+				console.log(error);
+				document.querySelector('.message-background').style.setProperty("opacity","0%");
+        		document.querySelector('.message-background').style.setProperty("z-index","1");
+				modalMessage.style.setProperty('display','flex');
+				modalMessage.style.setProperty('opacity','100%');
+				alert("Error: "+error);
+			});
+
+			}
+			
+			setTimeout(()=>{
+				runAxios(); 
+			}, 5000);
+	
+
 	}
+
 	const cleanButton = ()=>{
 		email.value = "";
 		message.value = "";
 	}
 
 </script>
+
+{#if visible}
+{#if reso<640}
+<svg style="position:absolute;">
+	<filter id="filtrito">
+		<feGaussianBlur in="SourceGraphic" stdDeviation="10" />
+		<feColorMatrix values="
+			1 0 0 0 0
+			0 1 0 0 0
+			0 0 1 0 0
+			0 0 0 20 -3"></feColorMatrix>	
+	</filter>
+</svg>
+{/if}
+{#if reso>640}
+<svg style="position:absolute;">
+	<filter id="filtrito">
+		<feGaussianBlur in="SourceGraphic" stdDeviation="10" />
+		<feColorMatrix values="
+			1 0 0 0 0
+			0 1 0 0 0
+			0 0 1 0 0
+			0 0 0 20 -10"></feColorMatrix>	
+	</filter>
+</svg>	
+{/if}
+
+<section transition:fade id="loader">
+	<div class="loader">
+		<span style="--i:1;"></span>
+		<span style="--i:2;"></span>
+		<span style="--i:3;"></span>
+		<span style="--i:4;"></span>
+		<span style="--i:5;"></span>
+		<span style="--i:6;"></span>
+		<span style="--i:7;"></span>
+		<span style="--i:8;"></span>
+		<span class="rotate" style="--j:0;"></span>
+		<span class="rotate" style="--j:1;"></span>
+		<span class="rotate" style="--j:2;"></span>
+		<span class="rotate" style="--j:3;"></span>
+		<span class="rotate" style="--j:4;"></span>
+	</div>
+</section>
+{/if}
+
+
 <div class="message-background" on:click={closeModalMessage}>
-	
+	<h2 transition:fade bind:this={emailSuccess} style="align-self:center;justify-self:center;text-align:center;display:none;color:white;z-index:8888888999999;justify-content:center;justify-items:center;align-items:center;align-content:center;width:80%;height:100%;">
+		Message Sended!! Thank You!
+	</h2>
 </div>
 <div class="message animateMessage" bind:this={modalMessage}>
 		<h1 style="cursor:pointer;position:absolute;right:0;top:-15%" on:click={closeModalMessage}>X</h1>
@@ -219,6 +308,63 @@
 .animateMessage{
     animation: bringoverMessage 0.5s cubic-bezier(0,1,.37,.32) forwards;
 }
+#loader {
+	position:absolute;
+	z-index:99999999991;
+	display:flex;
+	justify-items:center;
+	align-content:center;
+	justify-content:center;
+	align-items:center;
+	width: 100%;
+	height:100%;
+}
+.loader{
+	position:relative;
+	width:20%;
+	height:20%;
+	align-self:center;
+	justify-self:center;
+	filter:url(#filtrito);
+}
+.loader span{
+	position:absolute;
+	top:0;
+	left:0;
+	width:100%;
+	height:100%;
+	display:block;
+	transform: rotate(calc(45deg * var(--i)))
+}
+.rotate{
+	animation: animate 4s ease-in-out infinite;
+	animation-delay:calc(-0.2s * var(--j))
+}
+@keyframes animate{
+	0%{
+		transform:rotate(0deg);
+
+	}
+	100%{
+		transform:rotate(360deg);
+	}
+}
+.loader span::before{
+	content:"";
+	position:absolute;
+	top:0;
+	left:0;
+	width:40px;
+	height:40px;
+	background: linear-gradient(45deg,#c7eeff,#03a9f4);
+	border-radius: 50%;
+	box-shadow: 0 0 30px #00bcd4;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
 @keyframes bringoverMessage{
         0%{
             transform:translateX(0%);
@@ -247,6 +393,11 @@
     height:100vh;
     background-color:black;
     opacity:0%;
+	display:flex;
+	align-content:center;
+	align-items:center;
+	justify-content:center;
+	justify-items: center;
 }
 .message{
 	color:var(--l-purple);
@@ -413,6 +564,19 @@
         }
     }
 	@media (max-width: 640px) {
+
+	.loader span::before{
+	content:"";
+	position:absolute;
+	top:0;
+	left:0;
+	width:12px;
+	height:12px;
+	background: linear-gradient(45deg,#c7eeff,#03a9f4);
+	border-radius: 50%;
+	box-shadow: 0 0 16px #00bcd4;
+}
+
 		.animateMessage{
     animation: bringoversmallMessage 0.5s cubic-bezier(0,1,.37,.32) forwards;
 }

@@ -55,8 +55,8 @@ import { watchResize } from "svelte-watch-resize";
         },
         6:{
             "image":"",
-            "url": "https://agustinacarrizofotografia.herokuapp.com/",
-            "giturl": "https://github.com/SergioPosse/agustinacarrizofotografia",
+            "url": "https://agustinacarrizo.herokuapp.com/",
+            "giturl": "https://github.com/SergioPosse/agustinacarrizo",
             "title": "Simple photo/video store",
             "technologies": "ReactJs - Paypal Integration - NodeJs",
             "description": "Photo/video store for photographer Agustina Carrizo. Paypal API was implemented"
